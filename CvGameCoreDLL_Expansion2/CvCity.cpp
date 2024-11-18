@@ -17319,6 +17319,12 @@ int CvCity::getGreatPeopleRateModifier() const
 		}
 	}
 
+	int iGPRateModifierPerLocalTheme = getGPRateModifierPerLocalTheme();
+	if (iGPRateModifierPerLocalTheme > 0)
+	{
+		iValue += iGPRateModifierPerLocalTheme * GetCityBuildings()->GetTotalNumThemedBuildings();
+	}
+
 	// Corporations: Great people rate modifier by number of franchises
 	int iGPRateCorp = GetGPRateModifierPerXFranchises();
 	if (iGPRateCorp > 0)
