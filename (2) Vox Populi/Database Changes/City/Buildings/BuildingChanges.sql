@@ -72,6 +72,10 @@ SELECT
 FROM Buildings
 WHERE BuildingClass = 'BUILDINGCLASS_MONUMENT';
 
+UPDATE Buildings
+SET GPRateModifierPerLocalTheme = 100
+WHERE Type = 'BUILDING_MONUMENT';
+
 -- Amphitheater
 UPDATE Buildings
 SET Help = 'TXT_KEY_BUILDING_AMPHITHEATER_HELP'
