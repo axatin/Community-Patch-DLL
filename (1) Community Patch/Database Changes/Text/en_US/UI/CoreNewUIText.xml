@@ -691,7 +691,7 @@
 			<Text>{2_Sign}{1_Num}% [ICON_GREAT_PEOPLE] Great Person Rate per Established Franchise</Text>
 		</Row>
 		<Row Tag="TXT_KEY_PRODUCTION_BUILDING_GPP_MODIFIER_FROM_MARRIAGE">
-			<Text>{2_Sign}{1_Num}% [ICON_GREAT_PEOPLE] Great Person Rate per active Diplomatic Marriage</Text>
+			<Text>{2_Sign}{1_Num}% [ICON_GREAT_PEOPLE] Great Person Rate per active [ICON_RES_MARRIAGE] Diplomatic Marriage</Text>
 		</Row>
 		<Row Tag="TXT_KEY_PRODUCTION_BUILDING_GPP_MODIFIER_FROM_LOCAL_THEME">
 			<Text>{2_Sign}{1_Num}% [ICON_GREAT_PEOPLE] Great Person Rate per Theme in City</Text>
@@ -1840,7 +1840,7 @@
 			<Text>[NEWLINE][ICON_BULLET]{1: number "'+'##;'-'##"}% from Buildings</Text>
 		</Row>
 		<Row Tag="TXT_KEY_GPP_MOD_CAPITAL">
-			<Text>[NEWLINE][ICON_BULLET]{1: number "'+'##;'-'##"}% for [ICON_CAPITAL] Capital from Diplomatic Marriages</Text>
+			<Text>[NEWLINE][ICON_BULLET]{1: number "'+'##;'-'##"}% for [ICON_CAPITAL] Capital from [ICON_RES_MARRIAGE] Diplomatic Marriages</Text>
 		</Row>
 		<Row Tag="TXT_KEY_GPP_MOD_GA_BELIEF">
 			<Text>[NEWLINE][ICON_BULLET]{1: number "'+'##;'-'##"}% from [ICON_GOLDEN_AGE] Golden Age (Religious Beliefs)</Text>
