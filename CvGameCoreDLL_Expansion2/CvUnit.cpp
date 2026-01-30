@@ -20550,9 +20550,10 @@ void CvUnit::setXY(int iX, int iY, bool bGroup, bool bUpdate, bool bShow, bool b
 		}
 #endif
 
-		if (IsGainsXPFromScouting() && GetNumTilesRevealedThisTurn() > 0)
+		if (IsGainsXPFromScouting() && GetNumTilesRevealedThisTurn() > 0 && getExperienceTimes100() < 6000)
 		{
-			changeExperienceTimes100(GetNumTilesRevealedThisTurn() * 100 / /*10*/ GD_INT_GET(BALANCE_SCOUT_XP_DENOMINATOR));
+			int iNewXP = min(6000, GetNumTilesRevealedThisTurn() * 100 / /*10*/ GD_INT_GET(BALANCE_SCOUT_XP_DENOMINATOR) + getExperienceTimes100());
+			changeExperienceTimes100(iNewXP - getExperienceTimes100());
 		}
 		if (IsGainsYieldFromScoutingTimes100())
 		{
