@@ -383,7 +383,7 @@ public:
 	void changeNumUnitsSupplyFree(int iValue);
 
 	int calculateUnitCost() const;
-	int calculateResearchModifier(TechTypes eTech);
+	int calculateResearchModifier(TechTypes eTech) const;
 	int calculateGoldRate() const;
 	int calculateGoldRateTimes100() const;
 	int getAvgGoldRate() const;
@@ -841,10 +841,6 @@ public:
 	bool IsEligibleForLeagueBonus(int eType = 0);
 	int ScoreDifferencePercent(int eType = 0);
 	int ScoreDifference();
-
-	int GetScienceRateFromMinorAllies() const;
-	void ChangeScienceRateFromMinorAllies(int iChange);
-	void SetScienceRateFromMinorAllies(int iValue);
 
 	void ChangeExtraLeagueVotes(int iChange);
 
@@ -3053,7 +3049,6 @@ protected:
 	int m_iTotalArtsyAid;
 	bool m_bIsLeagueScholar;
 	bool m_bIsLeagueArt;
-	int m_iScienceRateFromLeague;
 	int m_iAttackBonusTurns;
 	int m_iCultureBonusTurns;
 	int m_iTourismBonusTurns;
@@ -3870,7 +3865,6 @@ SYNC_ARCHIVE_VAR(int, m_iTotalScienceyAid)
 SYNC_ARCHIVE_VAR(int, m_iTotalArtsyAid)
 SYNC_ARCHIVE_VAR(bool, m_bIsLeagueScholar)
 SYNC_ARCHIVE_VAR(bool, m_bIsLeagueArt)
-SYNC_ARCHIVE_VAR(int, m_iScienceRateFromLeague)
 SYNC_ARCHIVE_VAR(int, m_iAttackBonusTurns)
 SYNC_ARCHIVE_VAR(int, m_iCultureBonusTurns)
 SYNC_ARCHIVE_VAR(int, m_iTourismBonusTurns)

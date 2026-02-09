@@ -570,7 +570,6 @@ function ScienceTipHandler( control )
 			strText = strText .. ConvertTextKeyFormatDecimalTimes100("TXT_KEY_TP_SCIENCE_FROM_RESEARCH_AGREEMENTS", iScienceFromRAs);
 		end
 		
-		-- C4DF
 		-- Science from Vassals
 		local iScienceFromVassals = pPlayer:GetYieldPerTurnFromVassalsTimes100(YieldTypes.YIELD_SCIENCE);
 		if (iScienceFromVassals ~= 0) then
@@ -585,21 +584,6 @@ function ScienceTipHandler( control )
 			strText = strText .. ConvertTextKeyFormatDecimalTimes100("TXT_KEY_TP_SCIENCE_VASSALS", iScienceFromVassals);
 		end
 
-		-- Science from Allies (CSD MOD)
-		local iScienceFromAllies = pPlayer:GetScienceRateFromMinorAllies() * 100;
-		if (iScienceFromAllies ~= 0) then
-		
-			-- Add separator for non-initial entries
-			if (bFirstEntry) then
-				bFirstEntry = false;
-			else
-				strText = strText .. "[NEWLINE]";
-			end
-	
-			strText = strText .. ConvertTextKeyFormatDecimalTimes100("TXT_KEY_MINOR_SCIENCE_FROM_LEAGUE_ALLIES", iScienceFromAllies);
-		end
-		
--- CBP
 		-- Science from Annexed Minors
 		local iScienceFromAnnexedMinors = pPlayer:GetSciencePerTurnFromAnnexedMinors() * 100;
 		if (iScienceFromAnnexedMinors ~= 0) then

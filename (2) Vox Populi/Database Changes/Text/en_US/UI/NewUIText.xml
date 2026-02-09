@@ -559,12 +559,6 @@
 		<Row Tag="TXT_KEY_TP_SCIENCE_FROM_ESPIONAGE_NEGATIVE">
 			<Text>[ICON_BULLET][COLOR_NEGATIVE_TEXT]{1_Num}[ENDCOLOR] [ICON_RESEARCH] stolen by enemy [ICON_SPY] Spies.</Text>
 		</Row>
-		<Row Tag="TXT_KEY_MINOR_SCIENCE_FROM_LEAGUE_ALLIES">
-			<Text>[ICON_BULLET] [COLOR_POSITIVE_TEXT]-{1_Num}%[ENDCOLOR] [ICON_RESEARCH] cost for technologies known to other civilizations.</Text>
-		</Row>
-		<Row Tag="TXT_KEY_SCIENCE_FUNDING_FROM_LEAGUE">
-			<Text>[ICON_BULLET] [COLOR_POSITIVE_TEXT]+{1_Num}%[ENDCOLOR] [ICON_RESEARCH] from Resolutions</Text>
-		</Row>
 		<!-- Culture -->
 		<Row Tag="TXT_KEY_TP_CULTURE_FROM_ANNEXED_MINORS">
 			<Text>[ICON_BULLET][COLOR_POSITIVE_TEXT]+{1_Num}[ENDCOLOR] from conquered City-States.</Text>

@@ -1166,11 +1166,6 @@ g_toolTipHandler.SciencePerTurn = function()-- control )
 			tips:insertLocalizedIf( scienceFromDiplomacy < 0 and "TXT_KEY_TP_NEGATIVE_SCIENCE_FROM_DIPLOMACY", -scienceFromDiplomacy )
 		end
 
-		-- Compatibility with Gazebo's City-State Diplomacy Mod (CSD) for Brave New World v23
-		if g_activePlayer.GetScienceRateFromMinorAllies then
-			tips:insertLocalizedIfNonZeroFormatDecimal( "TXT_KEY_MINOR_SCIENCE_FROM_LEAGUE_ALLIES", g_activePlayer:GetScienceRateFromMinorAllies() )
-		end
-
 		-- Let people know that building more cities makes techs harder to get
 		if bnw_mode and g_isBasicHelp then
 			tips:insert( "" )

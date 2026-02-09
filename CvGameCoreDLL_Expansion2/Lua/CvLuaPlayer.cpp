@@ -582,7 +582,6 @@ void CvLuaPlayer::PushMethods(lua_State* L, int t)
 	Method(GetGreatMerchantRateModifier);
 	Method(GetGreatEngineerRateModifier);
 	Method(GetGreatDiplomatRateModifier);
-	Method(GetScienceRateFromMinorAllies);
 	Method(GetArtsyGreatPersonRateModifier);
 	Method(GetScienceyGreatPersonRateModifier);
 	Method(GetGreatPersonRateModifier);
@@ -7889,12 +7888,6 @@ int CvLuaPlayer::lGetGreatDiplomatRateModifier(lua_State* L)
 	CvPlayer* pPlayer = GetInstance(L);
 	lua_pushinteger(L, pPlayer->GetGreatPersonRateModifier(static_cast<GreatPersonTypes>(GC.getInfoTypeForString("GREATPERSON_DIPLOMAT"))));
 	return 1;
-}
-//------------------------------------------------------------------------------
-//int GetScienceRateFromMinorAllies();
-int CvLuaPlayer::lGetScienceRateFromMinorAllies(lua_State* L)
-{
-	return BasicLuaMethod(L, &CvPlayerAI::GetScienceRateFromMinorAllies);
 }
 //int GetArtsyGreatPersonRateModifier();
 int CvLuaPlayer::lGetArtsyGreatPersonRateModifier(lua_State* L)

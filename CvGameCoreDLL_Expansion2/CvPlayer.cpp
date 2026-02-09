@@ -519,7 +519,6 @@ CvPlayer::CvPlayer() :
 	, m_bIsLeagueAid()
 	, m_bIsLeagueScholar()
 	, m_bIsLeagueArt()
-	, m_iScienceRateFromLeague()
 	, m_iProductionBonusTurnsConquest()
 	, m_iCultureBonusTurnsConquest()
 	, m_iFreeGreatPeopleCreated()
@@ -1280,7 +1279,6 @@ void CvPlayer::uninit()
 	m_iTotalScienceyAid = 0;
 	m_bIsLeagueScholar = false;
 	m_bIsLeagueArt = false;
-	m_iScienceRateFromLeague = 0;
 	m_iWoundedUnitDamageMod = 0;
 	m_iUnitUpgradeCostMod = 0;
 	m_iBarbarianCombatBonus = 0;
@@ -16836,7 +16834,7 @@ int CvPlayer::calculateUnitCost() const
 	return GetTreasury()->CalculateUnitCost();
 }
 
-int CvPlayer::calculateResearchModifier(TechTypes eTech)
+int CvPlayer::calculateResearchModifier(TechTypes eTech) const
 {
 	int iModifier = 100;
 
@@ -16925,12 +16923,7 @@ int CvPlayer::calculateResearchModifier(TechTypes eTech)
 			{
 				// -2% tech costs per ally.
 				int iLeaguesAidScience = min(50, (iMinorAllies * /*2*/ GD_INT_GET(SCHOLAR_MINOR_ALLY_MULTIPLIER)));
-				SetScienceRateFromMinorAllies(iLeaguesAidScience);
-				iLeaguesMod += GetScienceRateFromMinorAllies();
-			}
-			else
-			{
-				SetScienceRateFromMinorAllies(0);
+				iLeaguesMod += iLeaguesAidScience;
 			}
 		}
 
@@ -23658,25 +23651,6 @@ int CvPlayer::ScoreDifference()
 		}
 	}
 	return iDifference;
-}
-
-/// Extra science from CS
-int CvPlayer::GetScienceRateFromMinorAllies() const
-{
-	return m_iScienceRateFromLeague;
-}
-
-/// Extra science from CS
-void CvPlayer::ChangeScienceRateFromMinorAllies(int iChange)
-{
-	SetScienceRateFromMinorAllies(GetScienceRateFromMinorAllies() + iChange);
-}
-
-/// Extra science from CS
-void CvPlayer::SetScienceRateFromMinorAllies(int iValue)
-{
-	if(GetScienceRateFromMinorAllies() != iValue)
-		m_iScienceRateFromLeague = iValue;
 }
 
 /// How much weaker do Units get when wounded?
@@ -43387,7 +43361,6 @@ void CvPlayer::Serialize(Player& player, Visitor& visitor)
 	visitor(player.m_iTotalArtsyAid);
 	visitor(player.m_bIsLeagueScholar);
 	visitor(player.m_bIsLeagueArt);
-	visitor(player.m_iScienceRateFromLeague);
 	visitor(player.m_iAttackBonusTurns);
 	visitor(player.m_iCultureBonusTurns);
 	visitor(player.m_iTourismBonusTurns);
