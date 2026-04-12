@@ -5739,7 +5739,7 @@ void CvGameDeals::DoEndTradedItem(CvTradedItem* pItem, PlayerTypes eToPlayer, bo
 			CvTeam& kTeam = GET_TEAM(toPlayer.getTeam());
 			int iToPlayerBeakers = toPlayer.GetResearchAgreementCounter(eFromPlayer);
 			int iFromPlayerBeakers = fromPlayer.GetResearchAgreementCounter(eToPlayer);
-			int iBeakersBonus = min(iToPlayerBeakers, iFromPlayerBeakers) / /*3*/ GD_INT_GET(RESEARCH_AGREEMENT_BOOST_DIVISOR); //one (third) of minimum contribution
+			int iBeakersBonus = (min(iToPlayerBeakers, iFromPlayerBeakers)/2 + (iToPlayerBeakers + iFromPlayerBeakers)/4) / /*3*/ GD_INT_GET(RESEARCH_AGREEMENT_BOOST_DIVISOR); //one (third) of minimum contribution
 			iBeakersBonus = (iBeakersBonus * toPlayer.GetMedianTechPercentage()) / 100;
 
 			TechTypes eCurrentTech = toPlayer.GetPlayerTechs()->GetCurrentResearch();
