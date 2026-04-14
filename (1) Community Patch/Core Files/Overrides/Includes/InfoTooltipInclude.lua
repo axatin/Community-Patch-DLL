@@ -4015,12 +4015,6 @@ function GetHelpTextForBuilding(eBuilding, bExcludeName, _, bNoMaintenance, pCit
 		table.insert(tLines, table.concat(tProjectedLines, "[NEWLINE]"));
 	end
 
-	if next(tBoostLines) then
-		local strHeadlineKey = pCity and "TXT_KEY_PRODUCTION_BUILDING_POTENTIAL_BOOSTS" or "TXT_KEY_PRODUCTION_BUILDING_ALL_BOOSTS";
-		table.insert(tBoostLines, 1, L(strHeadlineKey));
-		table.insert(tLines, table.concat(tBoostLines, "[NEWLINE]"));
-	end
-
 	----------------------
 	-- Footer section(s)
 	----------------------
