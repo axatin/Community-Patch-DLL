@@ -802,7 +802,7 @@ int CvBeliefEntry::GetMaxYieldPerFollower(int i) const
 	PRECONDITION(i > -1, "Index out of bounds");
 	return m_piMaxYieldPerFollower ? m_piMaxYieldPerFollower[i] : -1;
 }
-/// Accessor:: Yield from Followers Halved
+/// Accessor:: Yield from Followers Percent
 int CvBeliefEntry::GetMaxYieldPerFollowerPercent(int i) const
 {
 	PRECONDITION(i < NUM_YIELD_TYPES, "Index out of bounds");
@@ -4601,7 +4601,7 @@ int CvReligionBeliefs::GetMaxYieldPerFollower(YieldTypes eYieldType, PlayerTypes
 
 	return rtnValue;
 }
-/// Get yield from beliefs from # of followers halved
+/// Get yield from beliefs from # of followers percent
 int CvReligionBeliefs::GetMaxYieldPerFollowerPercent(YieldTypes eYieldType, PlayerTypes ePlayer, const CvCity* pCity, bool bHolyCityOnly) const
 {
 	CvBeliefXMLEntries* pBeliefs = GC.GetGameBeliefs();
@@ -4619,7 +4619,6 @@ int CvReligionBeliefs::GetMaxYieldPerFollowerPercent(YieldTypes eYieldType, Play
 	return rtnValue;
 }
 
-/// Get yield from beliefs from # of followers halved
 int CvReligionBeliefs::GetIgnorePolicyRequirementsAmount(EraTypes eEra, PlayerTypes ePlayer, const CvCity* pCity, bool bHolyCityOnly) const
 {
 	CvBeliefXMLEntries* pBeliefs = GC.GetGameBeliefs();

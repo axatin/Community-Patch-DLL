@@ -609,6 +609,16 @@ void CvGameReligions::DoPlayerTurn(CvPlayer& kPlayer)
 	{
 		if(CanCreatePantheon(kPlayer.GetID(), true) == FOUNDING_OK)
 		{
+			CvNotifications* pNotifications = kPlayer.GetNotifications();
+			if (pNotifications)
+			{
+				CvString strBuffer = GetLocalizedText("TXT_KEY_NOTIFICATION_ENOUGH_FAITH_FOR_PANTHEON");
+
+				CvString strSummary = GetLocalizedText("TXT_KEY_NOTIFICATION_SUMMARY_ENOUGH_FAITH_FOR_PANTHEON");
+				pNotifications->Add(NOTIFICATION_FOUND_PANTHEON, strBuffer, strSummary, -1, -1, -1);
+			}
+			gDLL->AutoSave(false);
+
 			// Create the pantheon
 			if(kPlayer.isHuman(ISHUMAN_AI_RELIGION_CHOICE))
 			{
@@ -646,6 +656,18 @@ void CvGameReligions::DoPlayerTurn(CvPlayer& kPlayer)
 	{
 		if (!kPlayer.isHuman(ISHUMAN_AI_RELIGION_CHOICE)) // continue from here
 		{
+			CvNotifications* pNotifications = kPlayer.GetNotifications();
+			if (pNotifications)
+			{
+				CvString strBuffer = GetLocalizedText("TXT_KEY_NOTIFICATION_ADD_REFORMATION_BELIEF");
+				CvString strSummary = GetLocalizedText("TXT_KEY_NOTIFICATION_SUMMARY_ADD_REFORMATION_BELIEF");
+				pNotifications->Add(NOTIFICATION_ADD_REFORMATION_BELIEF, strBuffer, strSummary, -1, -1, -1);
+			}
+			gDLL->AutoSave(false);
+			// switch to AI player again
+			// GC.getGame().setAIAutoPlay(9999, PlayerTypes(0));
+
+
 			BeliefTypes eReformationBelief = kPlayer.GetReligionAI()->ChooseReformationBelief(ePlayer, eOwnedReligion);
 			AddReformationBelief(ePlayer, eOwnedReligion, eReformationBelief);
 		}
@@ -5988,7 +6010,7 @@ BeliefTypes CvReligionAI::ChooseFounderBelief(PlayerTypes ePlayer, ReligionTypes
 }
 
 /// Select the belief most helpful to this pantheon
-BeliefTypes CvReligionAI::ChooseFollowerBelief(PlayerTypes ePlayer, ReligionTypes eReligion)
+BeliefTypes CvReligionAI::ChooseFollowerBelief(PlayerTypes ePlayer, ReligionTypes eReligion, BeliefTypes eSelectedAdditionalBelief)
 {
 	CvGameReligions* pGameReligions = GC.getGame().GetGameReligions();
 	CvWeightedVector<BeliefTypes> beliefChoices;
@@ -6004,7 +6026,7 @@ BeliefTypes CvReligionAI::ChooseFollowerBelief(PlayerTypes ePlayer, ReligionType
 		CvBeliefEntry* pEntry = m_pBeliefs->GetEntry(eBelief);
 		if(pEntry)
 		{
-			const int iScore = ScoreBelief(pEntry, viPlotWeights);
+			const int iScore = ScoreBelief(pEntry, viPlotWeights, true, NO_RELIGION, eSelectedAdditionalBelief);
 			beliefChoices.push_back(eBelief, iScore);
 		}
 	}
@@ -6074,7 +6096,7 @@ BeliefTypes CvReligionAI::ChooseBonusBelief(PlayerTypes ePlayer, ReligionTypes e
 		{
 			if (pEntry->GetID() != iExcludeBelief1 && pEntry->GetID() != iExcludeBelief2 && pEntry->GetID() != iExcludeBelief3)
 			{
-				const int iScore = ScoreBelief(pEntry, viPlotWeights, true);
+				const int iScore = ScoreBelief(pEntry, viPlotWeights);
 				beliefChoices.push_back(eBelief, iScore);
 			}
 		}
@@ -6124,6 +6146,155 @@ BeliefTypes CvReligionAI::ChooseReformationBelief(PlayerTypes ePlayer, ReligionT
 	}
 
 	return rtnValue;
+}
+
+// current number of cities following a religion
+int CvReligionAI::GetNumCitiesWithReligion(ReligionTypes eReligion, bool bFoundingReligion, bool bFoundingPantheon, bool bOnlyOurCities) const
+{
+	if (bFoundingPantheon)
+	{
+		// If we're founding a pantheon, all of our cities will immediately be converted to it
+		return m_pPlayer->getNumCities();
+	}
+
+	if (bFoundingReligion)
+	{
+		// if we're founding a religion, only our holy city will follow it initially
+		return 1;
+	}
+
+	if (eReligion == NO_RELIGION)
+		return 0;
+
+	// if we're evaluating an existing religion, calculate how many cities are following it
+	int iNumTotalCities = 0;
+	for (int iPlayerLoop = 0; iPlayerLoop < MAX_CIV_PLAYERS; iPlayerLoop++)
+	{
+		CvPlayer& kLoopPlayer = GET_PLAYER((PlayerTypes)iPlayerLoop);
+		if (!bOnlyOurCities || iPlayerLoop == m_pPlayer->GetID())
+		{
+			if (kLoopPlayer.isAlive())
+			{
+				int iLoop = 0;
+				CvCity* pLoopCity = NULL;
+				for (pLoopCity = kLoopPlayer.firstCity(&iLoop); pLoopCity != NULL; pLoopCity = kLoopPlayer.nextCity(&iLoop))
+				{
+					if (pLoopCity->GetCityReligions()->GetReligiousMajority() == eReligion)
+					{
+						iNumTotalCities++;
+					}
+				}
+			}
+		}
+	}
+
+	return iNumTotalCities;
+}
+
+// estimated number of cities to spread religion to
+int CvReligionAI::GetNumCitiesToSpreadReligionTo(ReligionTypes eReligion, bool bFoundingReligion, bool bFoundingPantheon) const
+{
+	if (bFoundingPantheon)
+	{
+		// Can't spread pantheons
+		return 0;
+	}
+
+
+	int iForeignCityPercentMultiplier = 100;
+	// if there are still religions to be founded, lower the value for foreign cities, the other players might found (but probably not if they don't have a pantheon yet)
+	int iNumReligionsStillToFound = GC.getGame().GetGameReligions()->GetNumReligionsStillToFound();
+	// exclude our own religion if we're founding
+	if (bFoundingReligion)
+		iNumReligionsStillToFound--;
+	if (iNumReligionsStillToFound > 0)
+	{
+		int iOtherPlayersWithoutReligion = 0;
+		int iMajorLoop;
+		for (iMajorLoop = 0; iMajorLoop < MAX_MAJOR_CIVS; iMajorLoop++)
+		{
+			// players without a religion, but with a pantheon
+			if (GET_PLAYER((PlayerTypes)iMajorLoop).isAlive() && iMajorLoop != m_pPlayer->GetID() && GET_PLAYER((PlayerTypes)iMajorLoop).GetReligions()->GetStateReligion(false) == NO_RELIGION && GET_PLAYER((PlayerTypes)iMajorLoop).GetReligions()->GetStateReligion(true) != NO_RELIGION)
+			{
+				iOtherPlayersWithoutReligion++;
+			}
+		}
+
+		// assume all players who haven't founded yet have an equal chance of founding
+		if (iOtherPlayersWithoutReligion > 0)
+			iForeignCityPercentMultiplier = 100 * (iOtherPlayersWithoutReligion - iNumReligionsStillToFound) / iOtherPlayersWithoutReligion;
+	}
+
+	int iNumTotalCities = 0;
+	for (int iPlayerLoop = 0; iPlayerLoop < MAX_CIV_PLAYERS; iPlayerLoop++)
+	{
+		CvPlayer& kLoopPlayer = GET_PLAYER((PlayerTypes)iPlayerLoop);
+		if (kLoopPlayer.isAlive() && GET_TEAM(m_pPlayer->getTeam()).isHasMet(kLoopPlayer.getTeam()))
+		{
+			// exclude players who own a religion or have asked us not to spread
+			if (m_pPlayer->isMajorCiv() && m_pPlayer->GetDiplomacyAI()->IsBadTheftTarget(kLoopPlayer.GetID(), THEFT_TYPE_CONVERSION))
+				continue;
+
+			int iNumCities = 0;
+			int iLoop = 0;
+			CvCity* pLoopCity = NULL;
+			for (pLoopCity = kLoopPlayer.firstCity(&iLoop); pLoopCity != NULL; pLoopCity = kLoopPlayer.nextCity(&iLoop))
+			{				
+				if (pLoopCity->GetCityReligions()->GetReligiousMajority() != eReligion)
+				{
+					iNumCities++;
+				}
+			}
+
+			// Always convert our own cities
+			if (kLoopPlayer.GetID() != m_pPlayer->GetID())
+			{
+				// only reduce score for players with a pantheon, players without one probably won't found
+				if (kLoopPlayer.GetReligions()->GetStateReligion(true) != NO_RELIGION)
+				{
+					iNumCities *= iForeignCityPercentMultiplier;
+					iNumCities /= 100;
+				}
+
+				if (!kLoopPlayer.GetReligions()->OwnsReligion(true) || kLoopPlayer.GetPlayerTraits()->IsAlwaysReligion())
+				{
+					iNumCities /= 4;
+				}
+
+				if (kLoopPlayer.GetProximityToPlayer(m_pPlayer->GetID()) == PLAYER_PROXIMITY_CLOSE)
+				{
+					iNumCities /= 2;
+				}
+				else if (kLoopPlayer.GetProximityToPlayer(m_pPlayer->GetID()) == PLAYER_PROXIMITY_FAR)
+				{
+					iNumCities /= 4;
+				}
+				else if (kLoopPlayer.GetProximityToPlayer(m_pPlayer->GetID()) == PLAYER_PROXIMITY_DISTANT)
+				{
+					iNumCities /= 8;
+				}
+			}
+
+			iNumTotalCities += iNumCities;
+		}
+	}
+
+	// if we're founding, our capital will immediately be converted
+	if (bFoundingReligion)
+		iNumTotalCities--;
+
+	// take into account unowned land. todo: only on our landmass
+	int iTotalLandPlots = GC.getMap().getLandPlots();
+	int iOwnedLandPlots = 0;
+	for (int iPlayerLoop = 0; iPlayerLoop < MAX_CIV_PLAYERS; iPlayerLoop++)
+	{
+		iOwnedLandPlots += GET_PLAYER((PlayerTypes)iPlayerLoop).getTotalLand();
+	}
+	iOwnedLandPlots = max(iOwnedLandPlots, 1);
+	iNumTotalCities *= min(500, 100 + (100 * iTotalLandPlots / iOwnedLandPlots - 100)/2);
+	iNumTotalCities /= 100;
+
+	return iNumTotalCities;
 }
 
 /// Find the city where a missionary should next spread his religion
@@ -6562,7 +6733,7 @@ ReligionTypes CvReligionAI::GetFavoriteForeignReligion(bool bForInternalSpread) 
 
 			//ignore founder beliefs!
 			if (pEntry && !pEntry->IsFounderBelief() && !pEntry->IsEnhancerBelief())
-				iScore += ScoreBelief(pEntry,viPlotWeights,false,false);
+				iScore += ScoreBelief(pEntry,viPlotWeights,false,itR->m_eReligion);
 		}
 
 		//consider whether we like the founder or not
@@ -7567,15 +7738,43 @@ CvWeightedVector<int> CvReligionAI::CalculatePlotWeightsForBeliefSelection(bool 
 }
 
 /// AI's perceived worth of a belief
-int CvReligionAI::ScoreBelief(CvBeliefEntry* pEntry, CvWeightedVector<int> viPlotWeights, bool bForBonus, bool bConsiderFutureTech) const
+int CvReligionAI::ScoreBelief(CvBeliefEntry* pEntry, CvWeightedVector<int> viPlotWeights, bool bConsiderFutureTech, ReligionTypes eForeignReligion, BeliefTypes eSelectedAdditionalBelief) const
 {
 	int iScorePlot = 0;
 	int iScoreCityOwned = 0;
 	int iScoreCityPotential = 0;
 	int iScorePlayer = 0;
 
+	BeliefList vExistingBeliefs;
+	if (eForeignReligion == NO_RELIGION)
+	{
+		ReligionTypes eReligion = m_pPlayer->GetReligions()->GetStateReligion();
+		if (eReligion != NO_RELIGION)
+		{
+			const CvReligion* pReligion = GC.getGame().GetGameReligions()->GetReligion(eReligion, m_pPlayer->GetID());
+			if (pReligion)
+			{
+				CvBeliefXMLEntries* pkBeliefs = GC.GetGameBeliefs();
+				const int iNumBeliefs = pkBeliefs->GetNumBeliefs();
+				for (int iI = 0; iI < iNumBeliefs; iI++)
+				{
+					const BeliefTypes eBelief(static_cast<BeliefTypes>(iI));
+					CvBeliefEntry* pEntry = pkBeliefs->GetEntry(eBelief);
+					if (pEntry && pReligion->m_Beliefs.HasBelief(eBelief))
+					{
+						vExistingBeliefs.push_back(iI);
+					}
+				}
+			}
+		}
+	}
+	if (eSelectedAdditionalBelief != NO_BELIEF)
+	{
+		vExistingBeliefs.push_back((int)eSelectedAdditionalBelief);
+	}
+
 	// special handing for civs that start with a pantheon: randomly choose between beliefs with flag AI_GoodStartingPantheon set in database
-	if (GET_PLAYER(m_pPlayer->GetID()).GetPlayerTraits()->StartsWithPantheon())
+	if (eForeignReligion == NO_RELIGION && pEntry->IsPantheonBelief() && m_pPlayer->GetPlayerTraits()->StartsWithPantheon())
 	{
 		return pEntry->IsAIGoodStartingPantheon() ? 1000 : 1;
 	}
@@ -7607,90 +7806,49 @@ int CvReligionAI::ScoreBelief(CvBeliefEntry* pEntry, CvWeightedVector<int> viPlo
 	int iLoop = 0;
 	for (CvCity* pLoopCity = m_pPlayer->firstCity(&iLoop); pLoopCity != NULL; pLoopCity = m_pPlayer->nextCity(&iLoop))
 	{
-		int iScoreAtCity = pEntry->IsPantheonBelief() ? ScorePantheonBeliefAtCity(pEntry, pLoopCity) : (/*6*/ GD_INT_GET(RELIGION_BELIEF_SCORE_CITY_MULTIPLIER) * ScoreBeliefAtCity(pEntry, pLoopCity));
+		int iScoreAtCity = ScoreBeliefAtCity(pEntry, pLoopCity, eForeignReligion);
 		iScoreCityOwned += iScoreAtCity;
 	}
 
 	if (iNumUnownedLandTilesToExpand > 0)
 	{
 		int iPreferredNewCities = min(6, max(3, 1 + iNumUnownedLandTilesToExpand / 20)) - m_pPlayer->getNumCities();
-		iScoreCityPotential += iPreferredNewCities * ScorePantheonBeliefAtCity(pEntry, NULL) / 2;
+		iScoreCityPotential += iPreferredNewCities * ScoreBeliefAtCity(pEntry, NULL, eForeignReligion) / 2;
 	}
 	
 
 	// Add in player-level value
-	iScorePlayer = pEntry->IsPantheonBelief() ? ScorePantheonBeliefForPlayer(pEntry) : ScoreBeliefForPlayer(pEntry);
+	iScorePlayer = ScoreBeliefForPlayer(pEntry, eForeignReligion, vExistingBeliefs);
 
 	int iRtnValue = iScorePlot + iScoreCityOwned + iScoreCityPotential + iScorePlayer;
 
 	//Final calculations
-	if ((pEntry->GetRequiredCivilization() != NO_CIVILIZATION) && (pEntry->GetRequiredCivilization() == m_pPlayer->getCivilizationType()))
+	int iMultiplier = 100;
+	if (pEntry->RequiresPeace())
 	{
-		iRtnValue *= 5;
-	}
-	if (m_pPlayer->GetPlayerTraits()->IsBonusReligiousBelief() && bForBonus)
-	{
-		int iModifier = 0;
-		if (pEntry->IsFounderBelief())
-			iModifier += 8;
-		else if(pEntry->IsPantheonBelief())
-			iModifier += -5;
-		else if (pEntry->IsEnhancerBelief())
-			iModifier += 2;
-		else if (pEntry->IsFollowerBelief())
+		if (m_pPlayer->GetDiplomacyAI()->IsGoingForWorldConquest())
+			iMultiplier = 0;
+		else if (m_pPlayer->IsAtWar())
+			iMultiplier /= 5;
+		else
 		{
-			bool bNoBuilding = true;
-			for (int iI = 0; iI < GC.getNumBuildingClassInfos(); iI++)
+			int iWorstApproach = (int)CIV_APPROACH_FRIENDLY;
+			for (int iPlayerLoop = 0; iPlayerLoop < MAX_MAJOR_CIVS; iPlayerLoop++)
 			{
-				if (pEntry->IsBuildingClassEnabled(iI))
+				CvPlayer& kLoopPlayer = GET_PLAYER((PlayerTypes)iPlayerLoop);
+				if (kLoopPlayer.isAlive() && iPlayerLoop != m_pPlayer->GetID() && GET_TEAM(m_pPlayer->getTeam()).isHasMet(kLoopPlayer.getTeam()))
 				{
-					BuildingTypes eBuilding = (BuildingTypes)m_pPlayer->getCivilizationInfo().getCivilizationBuildings(iI);
-					if (eBuilding != NO_BUILDING)
-					{
-						bNoBuilding = false;
-						if (m_pPlayer->GetPlayerTraits()->GetFaithCostModifier() != 0)
-						{
-							iModifier += 5;
-						}
-						else
-						{
-							iModifier += 1;
-						}
-						break;
-					}
+					iWorstApproach = min(iWorstApproach, (int)kLoopPlayer.GetDiplomacyAI()->GetSurfaceApproach(m_pPlayer->GetID()));
 				}
 			}
-			if (bNoBuilding)
-				iModifier += -2;
-		}
-
-		if (iModifier != 0)
-		{
-			iModifier *= 100;
-			bool ShouldSpread = false;
-
-			//Increase based on nearby cities that lack our faith.
-			//Subtract the % of enhanced faiths. More enhanced = less room for spread.
-			int iNumEnhancedReligions = GC.getGame().GetGameReligions()->GetNumReligionsEnhanced();
-			int iReligionsEnhancedPercent = (100 * iNumEnhancedReligions) / GC.getMap().getWorldInfo().getMaxActiveReligions();
-
-			//Let's look at all cities and get their religious status. Gives us a feel for what we can expect to gain in the near future.
-			int iNumNearbyCities = GetNumCitiesWithReligionCalculator(m_pPlayer->GetReligions()->GetStateReligion(), pEntry->IsPantheonBelief());
-
-			int iSpreadTemp = 100;
-			//Increase based on nearby cities that lack our faith.
-			iSpreadTemp *= iNumNearbyCities;
-			//Divide by estimated total # of cities on map.
-			iSpreadTemp /= GC.getMap().getWorldInfo().GetEstimatedNumCities();
-
-			if (iReligionsEnhancedPercent <= 50 || iSpreadTemp >= 25)
-				ShouldSpread = true;
-
-			iRtnValue += ShouldSpread ? iModifier : iModifier*-1;
-			if (iRtnValue <= 0)
-				iRtnValue = 1;
+			if (iWorstApproach == CIV_APPROACH_WAR)
+				iMultiplier /= 5;
+			else if (iWorstApproach == CIV_APPROACH_HOSTILE)
+				iMultiplier /= 4;
 		}
 	}
+	iRtnValue *= iMultiplier;
+	iRtnValue /= 100;
 
 	if (GC.getLogging() && GC.getAILogging())
 	{
@@ -7714,6 +7872,11 @@ int CvReligionAI::ScoreBelief(CvBeliefEntry* pEntry, CvWeightedVector<int> viPlo
 		strDesc = GetLocalizedText(pEntry->getShortDescription());
 		strTemp.Format("Belief, %s, Plot: %d, Owned Cities: %d, Potential Cities: %d, Player: %d", strDesc.GetCString(), iScorePlot, iScoreCityOwned, iScoreCityPotential, iScorePlayer);
 		strOutBuf = strBaseString + strTemp;
+		if (iMultiplier != 100)
+		{
+			strTemp.Format(". Belief requirements score reduction: %d%", iMultiplier - 100);
+			strOutBuf = strOutBuf + strTemp;
+		}
 		pLog->Msg(strOutBuf);
 	}
 
@@ -7903,10 +8066,16 @@ int CvReligionAI::GetValidPlotYieldTimes100(CvBeliefEntry* pEntry, CvPlot* pPlot
 			{
 				iModifier = 10; // we don't want to remove existing improvements
 			}
-			
-			if (pEntry->RequiresNoFeature() && eFeature != NO_FEATURE)
+
+			if (eFeature != NO_FEATURE && (pEntry->RequiresNoFeature() || GC.getFeatureInfo(eFeature)->isYieldNotAdditive()))
 			{
 				iModifier = iFeatureRemoveInFutureLikelihood;
+			}
+
+			if ((eTerrain == TERRAIN_DESERT || eTerrain == TERRAIN_TUNDRA) && eFeature == NO_FEATURE && eResource == NO_RESOURCE && !pPlot->isHills())
+			{
+				// desert and tundra tiles without features, resources or hills are unlikely to be worked
+				iModifier = 30;
 			}
 			iRtnValue += iTerrainYieldChangeTimes100 * iModifier / 100;
 		}
@@ -8068,35 +8237,154 @@ int CvReligionAI::GetValidPlotYieldTimes100(CvBeliefEntry* pEntry, CvPlot* pPlot
 	return iRtnValue;
 }
 
+void CvReligionAI::LogReligionYieldScores() const
+{
+
+	CvString strOutBuf = "";
+	CvString strLog;
+	CvDiplomacyAI* pDiploAI = m_pPlayer->GetDiplomacyAI();
+	if (pDiploAI->IsGoingForCultureVictory())
+	{
+		strLog.Format("Going For Culture Victory[NEWLINE][NEWLINE]");
+		strOutBuf += strLog;
+	}
+	else if (pDiploAI->IsGoingForDiploVictory())
+	{
+		strLog.Format("Going For Diplo Victory[NEWLINE][NEWLINE]");
+		strOutBuf += strLog;
+	}
+	else if (pDiploAI->IsGoingForSpaceshipVictory())
+	{
+		strLog.Format("Going For Science Victory[NEWLINE][NEWLINE]");
+		strOutBuf += strLog;
+	}
+	else if (pDiploAI->IsGoingForWorldConquest())
+	{
+		strLog.Format("Going For World Conquest[NEWLINE][NEWLINE]");
+		strOutBuf += strLog;
+	}
+
+	strLog.Format("Religion Yield Score for Happiness: %d[NEWLINE]", m_pPlayer->GetHappinessValue() * 100);
+	strOutBuf += strLog;
+	for (int iI = 0; iI < (int)YIELD_GOLDEN_AGE_POINTS; iI++)
+	{
+		strLog.Format("Religion Yield Score for %s: %d[NEWLINE]", GC.getYieldInfo((YieldTypes)iI)->GetText(), ScoreYieldForReligionTimes100((YieldTypes)iI));
+		strOutBuf += strLog;
+	}
+	CvNotifications* pNotification = m_pPlayer->GetNotifications();
+	if (pNotification)
+	{
+		pNotification->Add(NOTIFICATION_GENERIC, strOutBuf.c_str(), "Log", -1, -1, -11);
+	}
+}
 /// AI's evaluation of a certain yield
 int CvReligionAI::ScoreYieldForReligionTimes100(YieldTypes eYield) const
 {
-	int iPersonFlavor = 0;
+
+	int iValue = 0;
+	CvPlayerTraits* pPlayerTraits = m_pPlayer->GetPlayerTraits();
+	CvDiplomacyAI* pDiploAI = m_pPlayer->GetDiplomacyAI();
 	CvFlavorManager* pFlavorManager = m_pPlayer->GetFlavorManager();
 	switch (eYield)
 	{
 	case YIELD_FOOD:
-		iPersonFlavor = pFlavorManager->GetPersonalityIndividualFlavor((FlavorTypes)GC.getInfoTypeForString("FLAVOR_GROWTH")) * 50;
+	{
+		iValue += 300 + pFlavorManager->GetPersonalityIndividualFlavor((FlavorTypes)GC.getInfoTypeForString("FLAVOR_GROWTH")) * 20;
+		// higher value if going for culture victory
+		if (pDiploAI->IsGoingForCultureVictory())
+		{
+			iValue += 75;
+		}
+		// lower value if going for domination
+		if (pDiploAI->IsGoingForWorldConquest())
+		{
+			iValue -= 75;
+		}
+		// lower value if unhappy
+		if (m_pPlayer->IsEmpireUnhappy())
+			iValue -= 100;
+		if (m_pPlayer->IsEmpireVeryUnhappy())
+			iValue -= 100;
+		if (m_pPlayer->IsEmpireSuperUnhappy())
+			iValue -= 100;
+
+		iValue = max(iValue, 0);
+
+		// food decreases in value as the game progresses
+		iValue *= (100 - 100 * m_pPlayer->GetCurrentEra() / GC.getNumEraInfos());
+		iValue /= 100;
 		break;
-	case YIELD_PRODUCTION:
-		iPersonFlavor = pFlavorManager->GetPersonalityIndividualFlavor((FlavorTypes)GC.getInfoTypeForString("FLAVOR_PRODUCTION")) * 50;
-		break;
-	case YIELD_GOLD:
-		iPersonFlavor = pFlavorManager->GetPersonalityIndividualFlavor((FlavorTypes)GC.getInfoTypeForString("FLAVOR_GOLD")) * 50;
-		break;
-	case YIELD_SCIENCE:
-		iPersonFlavor = pFlavorManager->GetPersonalityIndividualFlavor((FlavorTypes)GC.getInfoTypeForString("FLAVOR_SCIENCE")) * 80;
-		break;
-	case YIELD_CULTURE:
-		iPersonFlavor = pFlavorManager->GetPersonalityIndividualFlavor((FlavorTypes)GC.getInfoTypeForString("FLAVOR_CULTURE")) * 100;
-		break;
-	case YIELD_FAITH:
-		iPersonFlavor = pFlavorManager->GetPersonalityIndividualFlavor((FlavorTypes)GC.getInfoTypeForString("FLAVOR_RELIGION")) * 110;
-		break;
-	default:
-		iPersonFlavor = 500;
 	}
-	return iPersonFlavor;
+	case YIELD_PRODUCTION:
+	{
+		iValue = 300;
+		iValue += pFlavorManager->GetPersonalityIndividualFlavor((FlavorTypes)GC.getInfoTypeForString("FLAVOR_PRODUCTION")) * 20;
+		if (pDiploAI->IsGoingForWorldConquest())
+			iValue += 200;
+		break;
+	}
+	case YIELD_GOLD:
+	{
+		iValue = MOD_BALANCE_VP ? 100 : 250;
+		iValue += pFlavorManager->GetPersonalityIndividualFlavor((FlavorTypes)GC.getInfoTypeForString("FLAVOR_GOLD")) * 20;
+		if (pDiploAI->IsGoingForDiploVictory())
+			iValue += 200;
+		//emphasize gold if we're in the red
+		int iGPT = m_pPlayer->GetTreasury()->CalculateBaseNetGold();
+		if (iGPT < -1)
+			iValue += (int)(sqrt((float)-iGPT) * (MOD_BALANCE_VP ? 20 : 50));
+		break;
+	}
+	case YIELD_SCIENCE:
+	{
+		iValue = 400;
+		iValue += pFlavorManager->GetPersonalityIndividualFlavor((FlavorTypes)GC.getInfoTypeForString("FLAVOR_SCIENCE")) * 20;
+		if (pDiploAI->IsGoingForSpaceshipVictory())
+			iValue += 250;
+		if (pDiploAI->IsGoingForWorldConquest())
+			iValue += 50;
+		break;
+	}
+	case YIELD_CULTURE:
+	{
+		iValue = MOD_BALANCE_VP ? 400 : 300;
+		iValue += pFlavorManager->GetPersonalityIndividualFlavor((FlavorTypes)GC.getInfoTypeForString("FLAVOR_CULTURE")) * 20;
+		if (pDiploAI->IsGoingForCultureVictory())
+			iValue += 100;
+		if (pDiploAI->IsGoingForWorldConquest())
+			iValue -= 50;
+		break;
+	}
+	case YIELD_FAITH:
+	{
+		if (m_pPlayer->GetReligions()->GetStateReligion(true) == NO_RELIGION && !pPlayerTraits->IsAlwaysReligion())
+		{
+			// founding a pantheon. Unless our trait allows us to always found, faith is very high-value
+			iValue = 1000;
+		}
+		else
+		{
+			iValue = 300;
+			iValue += pFlavorManager->GetPersonalityIndividualFlavor((FlavorTypes)GC.getInfoTypeForString("FLAVOR_RELIGION")) * 20;
+			// todo:
+			// do we get bonuses from spreading our religion?
+
+			// can we buy units with faith
+
+			// 
+		}
+
+
+		break;
+	}
+	case YIELD_TOURISM:
+	{
+		return pDiploAI->IsGoingForCultureVictory() ? 700 : 100;
+	}
+	default:
+		iValue = 400;
+	}
+	return min(1000, max(0, iValue));
 }
 
 /// AI's evaluation of this belief's usefulness at this one plot
@@ -8122,12 +8410,18 @@ int CvReligionAI::ScoreBeliefAtPlot(CvBeliefEntry* pEntry, CvPlot* pPlot, bool b
 
 /// AI's evaluation of this belief's usefulness at this city (or at a potential new city, if pCity is NULL)
 
-int CvReligionAI::ScorePantheonBeliefAtCity(CvBeliefEntry* pEntry, CvCity* pCity) const
+int CvReligionAI::ScoreBeliefAtCity(CvBeliefEntry* pEntry, CvCity* pCity, ReligionTypes eForeignReligion) const
 {
 	if (m_pPlayer->getCapitalCity() == NULL)
 		return 0;
 
-	// the different yield types are valued using ScoreYieldForReligionTimes100
+	ReligionTypes eReligion = m_pPlayer->GetReligions()->GetStateReligion(true);
+	if (eForeignReligion != NO_RELIGION)
+		eReligion = eForeignReligion;
+
+	CvDiplomacyAI* pDiploAI = m_pPlayer->GetDiplomacyAI();
+
+	// the different yield types are valued using ScoreYieldForReligionTimes100() / 100, returning values between 0.5 and 10
 	// great person points are valued with iGPValue (see below)
 
 	// in addition, each yield is multiplied with iAvailabilityModifier, which has a value of 10 if the yield is available instantly and a lower value if it takes time to get the yield or if it's unclear if we'll ever get it
@@ -8135,7 +8429,7 @@ int CvReligionAI::ScorePantheonBeliefAtCity(CvBeliefEntry* pEntry, CvCity* pCity
 
 	int iRtnValue = 0;
 	int iTempValue = 0;
-	int iHappinessMultiplier = 3;
+	int iHappinessMultiplier = m_pPlayer->GetHappinessValue();
 
 	int iI = 0;
 	int jJ = 0;
@@ -8148,28 +8442,30 @@ int CvReligionAI::ScorePantheonBeliefAtCity(CvBeliefEntry* pEntry, CvCity* pCity
 
 	//let's establish some mid-game goals for the AI.
 	int iCurrentCityPop = pCity ? pCity->getPopulation() : 1;
-	int iExpectedGrowth = 5;
+	int iExpectedTurnsToGrow = 20;
+	if (pCity)
+	{
+		int iExcessFoodPerTurn = pCity->getYieldRateTimes100(YIELD_FOOD, true, true);
+		if (iExcessFoodPerTurn > 0)
+		{
+			iExpectedTurnsToGrow = 100 * pCity->growthThreshold() / iExcessFoodPerTurn * 2;
+		}
+		else
+		{
+			iExpectedTurnsToGrow = 99;
+		}
+	}
+	if (pPlayerTraits->IsPopulationBoostReligion() && eReligion <= RELIGION_PANTHEON)
+	{
+		iExpectedTurnsToGrow *= 3;
+		iExpectedTurnsToGrow /= 4;
+	}
+	iExpectedTurnsToGrow = max(1, iExpectedTurnsToGrow);
+	int iExpectedGrowth = min(10, 50 / iExpectedTurnsToGrow);
+
 	PolicyBranchTypes eTradition = (PolicyBranchTypes)GC.getInfoTypeForString("POLICY_BRANCH_TRADITION", true);
-	if (m_pPlayer->GetPlayerPolicies()->IsPolicyBranchUnlocked(eTradition) || pPlayerTraits->IsSmaller())
-	{
-		iExpectedGrowth *= 2;
-	}
-	if (m_pPlayer->GetPlayerTraits()->IsPopulationBoostReligion())
-	{
-		iExpectedGrowth *= 2;
-	}
-	iExpectedGrowth *= (100 + (bIsCapital ? m_pPlayer->GetCapitalGrowthMod() : m_pPlayer->GetCityGrowthMod()));
-	iExpectedGrowth /= 100;
 
-	if (pPlayerTraits->IsWarmonger())
-	{
-		iExpectedGrowth /= 2;
-	}
-	iExpectedGrowth *= 100 + m_pPlayer->GetUnhappinessGrowthPenalty();
-	iExpectedGrowth /= 100;
-
-
-	int iGPValue = pFlavorManager->GetPersonalityIndividualFlavor((FlavorTypes)GC.getInfoTypeForString("FLAVOR_GREAT_PEOPLE")) / 4;
+	int iGPValue = pFlavorManager->GetPersonalityIndividualFlavor((FlavorTypes)GC.getInfoTypeForString("FLAVOR_GREAT_PEOPLE")) / 5;
 	if (pPlayerTraits->IsTourism() || m_pPlayer->GetPlayerPolicies()->IsPolicyBranchUnlocked(eTradition))
 	{
 		iGPValue *= 3;
@@ -8237,7 +8533,7 @@ int CvReligionAI::ScorePantheonBeliefAtCity(CvBeliefEntry* pEntry, CvCity* pCity
 
 						int iEraNeeded = pkTechInfo->GetEra();
 						int iCurrentEra = m_pPlayer->GetCurrentEra();
-						iAvailabilityModifier = max(0, 3 - (iEraNeeded - iCurrentEra));  // lose remaining value if we have to wait
+						iAvailabilityModifier = max(0, 3 - (iEraNeeded - iCurrentEra));  // lower value if we have to wait
 					}
 				}
 			}
@@ -8245,10 +8541,8 @@ int CvReligionAI::ScorePantheonBeliefAtCity(CvBeliefEntry* pEntry, CvCity* pCity
 		}
 	}
 
-	ReligionTypes eReligion = m_pPlayer->GetReligions()->GetStateReligion(true);
-
 	bool bIsHolyCity = pCity && pCity->GetCityReligions()->IsHolyCityForReligion(eReligion);
-	if (pCity && !bIsHolyCity && m_pPlayer->GetReligions()->GetReligionCreatedByPlayer(false) == NO_RELIGION)
+	if (pCity && !bIsHolyCity && m_pPlayer->GetReligions()->GetReligionCreatedByPlayer(false) == NO_RELIGION && !pEntry->IsPantheonBelief())
 	{
 		int iLoopUnit = 0;
 		CvUnit* pLoopUnit = NULL;
@@ -8262,6 +8556,34 @@ int CvReligionAI::ScorePantheonBeliefAtCity(CvBeliefEntry* pEntry, CvCity* pCity
 					break;
 				}
 			}
+		}
+	}
+
+	int iCurrentFollowers = 0;
+	int iExpectedFollowers = 0;
+	bool bFollowingReligion = false;
+	if (pCity)
+	{
+		if (eReligion == NO_RELIGION)
+		{
+			// founding a pantheon, all cities get initial followers
+			iCurrentFollowers = iCurrentCityPop * 3 / 4;
+			bFollowingReligion = true;
+			iExpectedFollowers = iCurrentFollowers + iExpectedGrowth * 3 / 4;
+		}
+		else if (eReligion == RELIGION_PANTHEON)
+		{
+			// founding a religion. the new holy city gets initial followers, all others do not
+			iCurrentFollowers = bIsHolyCity ? (iCurrentCityPop * 3 / 4) : 0;
+			bFollowingReligion = bIsHolyCity;
+			iExpectedFollowers = (iCurrentCityPop + iExpectedGrowth) / 2;
+		}
+		else
+		{
+			// enhancing an existing religion or evaluating a foreign religion for our cities
+			iCurrentFollowers = pCity->GetCityReligions()->GetNumFollowers(eReligion);
+			bFollowingReligion = pCity->GetCityReligions()->GetReligiousMajority() == eReligion;
+			iExpectedFollowers = (iCurrentCityPop + iExpectedGrowth) * 3 / 4;
 		}
 	}
 
@@ -8282,44 +8604,71 @@ int CvReligionAI::ScorePantheonBeliefAtCity(CvBeliefEntry* pEntry, CvCity* pCity
 		if (pEntry->GetYieldPerXFollowers(iI) > 0)
 		{
 			// population we have
-			iTempValue += 5 * iCurrentCityPop / pEntry->GetYieldPerXFollowers(iI);
+			iTempValue += 4 * iCurrentFollowers / pEntry->GetYieldPerXFollowers(iI);
 			// additional population we expect to get in the near future
-			iTempValue += 2 * iExpectedGrowth / pEntry->GetYieldPerXFollowers(iI);
+			iTempValue += 2 * iExpectedFollowers / pEntry->GetYieldPerXFollowers(iI);
 		}
 
 		// caps at half number of followers. assume we are at cap.
 		if (pEntry->GetYieldPerGPT(iI) > 0)
 		{
-			iTempValue += 10 * (iCurrentCityPop / 2) ;
-			iTempValue += 5 * (iExpectedGrowth / 2);
+			iTempValue += 10 * (iCurrentFollowers / 2) ;
+			iTempValue += 5 * (iExpectedFollowers / 2);
 		}
 
 		// yield per birth
 		if (pEntry->GetYieldPerBirth(iI) > 0)
 		{
-			iTempValue += iExpectedGrowth * pEntry->GetYieldPerBirth(iI) / 5;
+			iTempValue += 10 * pEntry->GetYieldPerBirth(iI) / iExpectedTurnsToGrow;
 		}
 		if (bIsHolyCity && pEntry->GetYieldPerHolyCityBirth(iI) > 0)
 		{
-			iTempValue += iExpectedGrowth * pEntry->GetYieldPerHolyCityBirth(iI) / 5;
+			iTempValue += 10 * pEntry->GetYieldPerHolyCityBirth(iI) / iExpectedTurnsToGrow;
 		}
 
 		if (pEntry->GetYieldFromWLTKD(iI) > 0)
 		{
 			// how often do we expect to have WLKTD in our cities?
-			// todo: change depending on wide/tall, traits, etc.
-			iAvailabilityModifier = 5;
+			if (pPlayerTraits->IsGreatWorkWLTKD() || pPlayerTraits->IsExpansionWLTKD())
+				iAvailabilityModifier = 10;
+			else
+			{
+				// estimate availability based on the percent of land we own
+				iAvailabilityModifier = 10 * m_pPlayer->getTotalLand() / GC.getMap().getLandPlots();
+				// more if we're a warmonger or a diplomat
+				if (pDiploAI->IsGoingForWorldConquest() || pDiploAI->IsGoingForDiploVictory())
+				{
+					iAvailabilityModifier += 2;
+				}
+				if (pPlayerTraits->GetWLTKDGATimer() > 0)
+					iAvailabilityModifier++;
+				if (pPlayerTraits->IsGPWLTKD())
+					iAvailabilityModifier += 2;
+			}
+
+			iAvailabilityModifier = min(iAvailabilityModifier, 10);
 			iTempValue += iAvailabilityModifier * pEntry->GetYieldFromWLTKD(iI) / 10;
+			
 		}
 
 		iRtnValue += iTempValue * ScoreYieldForReligionTimes100((YieldTypes)iI) / 100;
+	}
+
+	// growth mod
+	if (pEntry->GetCityGrowthModifier() > 0)
+	{
+		if (pCity)
+		{
+			int iExcessFood = (pCity ? pCity->getYieldRateTimes100(YIELD_FOOD, false, true) : 1000) / 100;
+			iRtnValue += 20 /*Availiability of 10, plus another 10 because this scales very well*/ * iExcessFood * pEntry->GetCityGrowthModifier() * ScoreYieldForReligionTimes100(YIELD_FOOD) / 10000;
+		}
 	}
 
 	////////////////////
 	// Great People
 	///////////////////
 
-	if (bIsCapital || (pCity && pCity->GetCityReligions()->IsHolyCityAnyReligion()))
+	if ((pEntry->IsPantheonBelief() && bIsCapital) || bIsHolyCity)
 	{
 		for (jJ = 0; jJ < GC.getNumGreatPersonInfos(); jJ++)
 		{
@@ -8330,12 +8679,17 @@ int CvReligionAI::ScorePantheonBeliefAtCity(CvBeliefEntry* pEntry, CvCity* pCity
 			if (pEntry->GetGreatPersonPoints(eGP) > 0)
 			{
 				iTempValue = 10 * pEntry->GetGreatPersonPoints(eGP) * iGPValue;
-				if (eGP == GetGreatPersonFromUnitClass((UnitClassTypes)GC.getInfoTypeForString("UNITCLASS_SCIENTIST")))
+				
+				int iMod = m_pPlayer->getGreatPeopleRateModifier() + m_pPlayer->GetGreatPersonRateModifier(eGP);
+				int iNumPuppets = m_pPlayer->GetNumPuppetCities();
+				if (iNumPuppets > 0)
 				{
-					iTempValue *= 100 + 2 * pPlayerTraits->GetGreatScientistRateModifier();
-					iTempValue /= 100;
+					iMod += iNumPuppets * m_pPlayer->GetPlayerTraits()->GetPerPuppetGreatPersonRateModifier(eGP);
 				}
-				iRtnValue += iTempValue;
+				iMod += m_pPlayer->getSpecificGreatPersonRateModifierFromMonopoly(eGP);
+				iMod += pCity ? pCity->getGreatPeopleRateModifier() : 0;
+
+				iRtnValue += iTempValue * (100 + iMod) / 100;
 			}
 		}
 	}
@@ -8351,7 +8705,8 @@ int CvReligionAI::ScorePantheonBeliefAtCity(CvBeliefEntry* pEntry, CvCity* pCity
 		// City yield change
 		iTempValue += 10 * pEntry->GetCityYieldChange(iI);
 
-		if (bIsCapital) {
+		if (bIsCapital)
+		{
 			iTempValue += 10 * pEntry->GetCapitalYieldChange(iI);
 		}
 
@@ -8371,8 +8726,51 @@ int CvReligionAI::ScorePantheonBeliefAtCity(CvBeliefEntry* pEntry, CvCity* pCity
 		// Trade route yield change
 		if (pEntry->GetYieldChangeTradeRoute(iI) > 0)
 		{
-			iAvailabilityModifier = (pCity && pCity->IsRouteToCapitalConnected()) ? 10 : 7;
+			int iNumWorkers = m_pPlayer->GetNumUnitsWithUnitAI(UNITAI_WORKER, true);
+
+			if (pCity && pCity->IsRouteToCapitalConnected())
+			{
+				iAvailabilityModifier = 10;
+			}
+			else
+			{
+				iAvailabilityModifier = 3 + min(iNumWorkers, 3);
+				if (!pCity)
+					iAvailabilityModifier -= 2;
+
+				// CP Carthage gives free harbors in every coastal city
+				if (pPlayerTraits->GetFreeBuilding() != NO_BUILDING)
+				{
+					CvBuildingEntry* pBuildingInfo = GC.getBuildingInfo(pPlayerTraits->GetFreeBuilding());
+					if (pBuildingInfo && pBuildingInfo->AllowsWaterRoutes())
+					{
+						iAvailabilityModifier += 5;
+					}
+				}
+				if (pPlayerTraits->IsWoodlandMovementBonus())
+				{
+					iAvailabilityModifier += 3;
+				}
+			}
+			iAvailabilityModifier = min(iAvailabilityModifier, 10);
+
 			iTempValue += iAvailabilityModifier * pEntry->GetYieldChangeTradeRoute(iI);
+		}
+
+		// Yield per Science
+		if (pEntry->GetYieldPerScience(iI) > 0)
+		{
+			// taking into account both current and future yields
+			int iExpectedScienceInCityTimes100 = pCity ? (pCity->getYieldRateTimes100(YIELD_SCIENCE) * 125 / 100) : (250 * m_pPlayer->GetCurrentEra());
+			iTempValue += 10 * (iExpectedScienceInCityTimes100 / 100 / pEntry->GetYieldPerScience(iI));
+		}
+
+		// Yield per GPT
+		if (pEntry->GetYieldPerGPT(iI) > 0)
+		{
+			// taking into account both current and future yields
+			int iExpectedGPTInCityTimes100 = pCity ? (pCity->getYieldRateTimes100(YIELD_GOLD) * 125 / 100) : (400 * m_pPlayer->GetCurrentEra());
+			iTempValue += 10 * (iExpectedGPTInCityTimes100 / 100 / pEntry->GetYieldPerGPT(iI));
 		}
 
 		// Specialist yield change
@@ -8388,11 +8786,11 @@ int CvReligionAI::ScorePantheonBeliefAtCity(CvBeliefEntry* pEntry, CvCity* pCity
 				// if not, current population gives us an idea how long it'll take to get one
 				else if (pCity->GetCityCitizens()->GetSpecialistSlotsTotal() > 0)
 				{
-					iAvailabilityModifier = max(4, min(10, iCurrentCityPop));
+					iAvailabilityModifier = max(5, min(10, iCurrentCityPop));
 				}
 				else
 				{
-					iAvailabilityModifier = min(3, iCurrentCityPop);
+					iAvailabilityModifier = max(1, min(3, iCurrentCityPop) - 1);
 				}
 			}
 			else
@@ -8436,6 +8834,7 @@ int CvReligionAI::ScorePantheonBeliefAtCity(CvBeliefEntry* pEntry, CvCity* pCity
 		if (bIsCapital && pEntry->GetYieldPerLux(iI) > 0)
 		{
 			int iNumLuxNow = 0;
+			int iNumLuxUnimproved = 0;
 			ResourceTypes eResource;
 			for (int iResourceLoop = 0; iResourceLoop < GC.getNumResourceInfos(); iResourceLoop++)
 			{
@@ -8445,10 +8844,30 @@ int CvReligionAI::ScorePantheonBeliefAtCity(CvBeliefEntry* pEntry, CvCity* pCity
 				{
 					if ((m_pPlayer->getNumResourceTotal(eResource, true) + m_pPlayer->getResourceExport(eResource)) > 0)
 						iNumLuxNow++;
+					else if (m_pPlayer->getNumResourceUnimproved(eResource) > 0)
+						iNumLuxUnimproved++;
 				}
 			}
 
-			iTempValue += 10 * iNumLuxNow * pEntry->GetYieldPerLux(iI);
+			bool bTraitLuxuryImport = pPlayerTraits->IsImportsCountTowardsMonopolies();
+			if (!bTraitLuxuryImport)
+			{
+				for (int iYieldLoop = 0; iYieldLoop < NUM_YIELD_TYPES; iYieldLoop++)
+				{
+					YieldTypes eYield = static_cast<YieldTypes>(iYieldLoop);
+					if (pPlayerTraits->GetYieldFromImport(eYield) > 0)
+					{
+						bTraitLuxuryImport = true;
+						break;
+					}
+				}
+			}
+
+			int iNumFutureLuxEstimate = 1;
+			if (bTraitLuxuryImport || pPlayerTraits->GetUniqueLuxuryQuantity() > 0)
+				iNumFutureLuxEstimate += 2;
+	
+			iTempValue += (10 * iNumLuxNow + 5 * iNumLuxUnimproved + 2 * iNumFutureLuxEstimate) * pEntry->GetYieldPerLux(iI);
 		}
 
 		if (pCity && pEntry->GetYieldPerActiveTR(iI) > 0)
@@ -8487,7 +8906,7 @@ int CvReligionAI::ScorePantheonBeliefAtCity(CvBeliefEntry* pEntry, CvCity* pCity
 				}
 				else 
 				{
-					if ((pkBuildingInfo->IsCapital() || pkBuildingInfo->IsCapitalOnly()) && !bIsCapital)
+					if ((pkBuildingInfo->IsCapital() || ::isNationalWonderClass(pkBuildingInfo->GetBuildingClassInfo()) || pkBuildingInfo->IsCapitalOnly()) && !bIsCapital)
 					{
 						iAvailabilityModifier = 0;
 					}
@@ -8541,18 +8960,58 @@ int CvReligionAI::ScorePantheonBeliefAtCity(CvBeliefEntry* pEntry, CvCity* pCity
 				iTempValue += 10 * pEntry->GetYieldPerConstruction(iI) / 15;
 			}
 		}
-
-		if (pEntry->GetYieldPerWorldWonderConstruction(iI) > 0)
+		int iReligionYieldMaxFollowers = pEntry->GetMaxYieldPerFollower(iI);
+		int iReligionYieldMaxFollowersPercent = pEntry->GetMaxYieldPerFollowerPercent(iI);
+		if (iReligionYieldMaxFollowersPercent > 0)
 		{
-			if (bIsCapital)
-			{
-				iTempValue += pEntry->GetYieldPerWorldWonderConstruction(iI) / 50;
-			}
+			iTempValue += min(10 * iReligionYieldMaxFollowers, 10 * iCurrentFollowers + 5 * iExpectedFollowers) * iReligionYieldMaxFollowersPercent / 100;
+		}
+		else
+		{
+			iTempValue += min(10 * iReligionYieldMaxFollowers, 10 * iCurrentFollowers + 5 * iExpectedFollowers);
+		}
+
+		// todo: percent
+		if (pEntry->GetMaxYieldModifierPerFollower(iI) > 0)
+		{
+			// this is a modifier, so it scales very well
+			iTempValue += 20 * min(pEntry->GetMaxYieldModifierPerFollower(iI), (iCurrentFollowers + iExpectedFollowers / 2)) * (pCity ? pCity->getBaseYieldRateTimes100((YieldTypes)iI) : 1000) / 10000;
 		}
 
 		iRtnValue += iTempValue * ScoreYieldForReligionTimes100((YieldTypes)iI) / 100;
 	}
 
+	if (pEntry->GetGoldPerFollowingCity() > 0 || pEntry->GetHappinessPerFollowingCity() > 0)
+	{
+		int iAvailabilityModifier = 0;
+		if (pCity)
+		{
+			iAvailabilityModifier = bFollowingReligion ? 10 : 7;
+		}
+		else
+		{
+			iAvailabilityModifier = 3;
+		}
+		iRtnValue += iAvailabilityModifier * pEntry->GetGoldPerFollowingCity() * ScoreYieldForReligionTimes100(YIELD_GOLD) / 100;
+		iRtnValue += (int)(pEntry->GetHappinessPerFollowingCity() * iAvailabilityModifier * iHappinessMultiplier);
+	}
+	if (pEntry->GetFullyConvertedHappiness() > 0)
+	{
+		// this is very unsafe, don't assume we'll get fully converted cities other than the ones we already have
+		if (eReligion != NO_RELIGION && pCity && pCity->GetCityReligions()->GetFollowersOtherReligions(eReligion) <= 0)
+		{
+			iRtnValue += 8 * pEntry->GetFullyConvertedHappiness() * iHappinessMultiplier;
+		}
+	}
+	if (pEntry->GetGoldPerXFollowers() > 0)
+	{
+		iRtnValue += (10 * iCurrentFollowers + 5 * iExpectedFollowers) * ScoreYieldForReligionTimes100(YIELD_GOLD) / 100 / pEntry->GetGoldPerXFollowers();
+	}
+
+
+
+
+	// Reductions for belief requirements
 	if (pEntry->GetMinPopulation() > 0)
 	{
 		if (iCurrentCityPop < pEntry->GetMinPopulation())
@@ -8563,18 +9022,6 @@ int CvReligionAI::ScorePantheonBeliefAtCity(CvBeliefEntry* pEntry, CvCity* pCity
 	}
 	if (pEntry->GetMinFollowers() > 0)
 	{
-		int iCurrentFollowers = 0;
-		if (pCity)
-		{
-			if (eReligion == NO_RELIGION)
-			{
-				iCurrentFollowers = iCurrentCityPop / 2;
-			}
-			else
-			{
-				iCurrentFollowers = pCity->GetCityReligions()->GetNumFollowers(eReligion);
-			}
-		}
 		if (iCurrentFollowers < pEntry->GetMinFollowers())
 		{
 			iRtnValue *= (100 - 10 * (pEntry->GetMinFollowers() - iCurrentFollowers));
@@ -8585,711 +9032,268 @@ int CvReligionAI::ScorePantheonBeliefAtCity(CvBeliefEntry* pEntry, CvCity* pCity
 	return iRtnValue;
 }
 
-
-/// AI's evaluation of this belief's usefulness at this city
-int CvReligionAI::ScoreBeliefAtCity(CvBeliefEntry* pEntry, CvCity* pCity) const
+// AI's evaluation of a pantheon belief on player level
+int CvReligionAI::ScoreBeliefForPlayer(CvBeliefEntry* pEntry, ReligionTypes eForeignReligion, BeliefList vExistingBeliefs) const
 {
+
 	if (m_pPlayer->getCapitalCity() == NULL)
 		return 0;
 
 	int iRtnValue = 0;
-	int iTempValue = 0;
-	int iMinPop = 0;
-	int iMinFollowers = 0;
-	int iHappinessMultiplier = 3;
+	int iTemp = 0;
+	int iI = 0;
+	// which policy branches have we adopted? if no policy branch adopted, check player traits
+	CvPlayerTraits* pPlayerTraits = m_pPlayer->GetPlayerTraits();
+	CvDiplomacyAI* pDiploAI = m_pPlayer->GetDiplomacyAI();
+	bool bIsTall = pDiploAI->IsGoingForCultureVictory();
+	bool bIsWarmonger = pDiploAI->IsGoingForWorldConquest();
+	bool bIsExpansion = pDiploAI->IsGoingForDiploVictory();
+	PolicyBranchTypes eAuthority = (PolicyBranchTypes)GC.getInfoTypeForString("POLICY_BRANCH_HONOR", true);
+
+	static EconomicAIStrategyTypes eEnoughExpansion = (EconomicAIStrategyTypes)GC.getInfoTypeForString("ECONOMICAISTRATEGY_ENOUGH_EXPANSION");
+	if (bIsExpansion && m_pPlayer->GetEconomicAI()->IsUsingStrategy(eEnoughExpansion))
+	{
+		bIsExpansion = false;
+		bIsTall = true;
+	}
 
 	CvFlavorManager* pFlavorManager = m_pPlayer->GetFlavorManager();
-	int iFlavorOffense = pFlavorManager->GetPersonalityIndividualFlavor((FlavorTypes)GC.getInfoTypeForString("FLAVOR_OFFENSE"));
-	int iFlavorDefense = pFlavorManager->GetPersonalityIndividualFlavor((FlavorTypes)GC.getInfoTypeForString("FLAVOR_DEFENSE"));
-	int iFlavorCityDefense = pFlavorManager->GetPersonalityIndividualFlavor((FlavorTypes)GC.getInfoTypeForString("FLAVOR_CITY_DEFENSE"));
-	int iFlavorHappiness = pFlavorManager->GetPersonalityIndividualFlavor((FlavorTypes)GC.getInfoTypeForString("FLAVOR_HAPPINESS"));
-	int iFlavorGP = pFlavorManager->GetPersonalityIndividualFlavor((FlavorTypes)GC.getInfoTypeForString("FLAVOR_GREAT_PEOPLE"));
 
-	int iHappinessNeedFactor = iFlavorOffense * 2 + iFlavorHappiness - iFlavorDefense;
-	if (iHappinessNeedFactor > 15)
+	int iNumNeighbors = 0;
+	int iNeighborWarmongerThreat = 0;
+	for (int iPlayerLoop = 0; iPlayerLoop < MAX_MAJOR_CIVS; iPlayerLoop++)
 	{
-		iHappinessMultiplier = 15;
-	}
-	else if (iHappinessNeedFactor < 6)
-	{
-		iHappinessMultiplier = 6;
-	}
-
-	iMinPop = pEntry->GetMinPopulation();
-	iMinFollowers = pEntry->GetMinFollowers();
-
-	CvPlayerTraits* pPlayerTraits = m_pPlayer->GetPlayerTraits();
-
-	//let's establish some mid-game goals for the AI.
-	int iIdealCityPop = max(m_pPlayer->getCapitalCity()->getPopulation(), 30);
-	int iIdealEmpireSize = max(m_pPlayer->getNumCities(), GC.getMap().getWorldInfo().getTargetNumCities());
-	if (pPlayerTraits->IsSmaller())
-	{
-		iIdealCityPop += 5;
-		iIdealEmpireSize--;
-	}
-	if (pPlayerTraits->IsExpansionist())
-	{
-		iIdealCityPop -= 4;
-		iIdealEmpireSize += 5;
-	}
-	if (pPlayerTraits->IsWarmonger())
-	{
-		iIdealCityPop -= 2;
-		iIdealEmpireSize += 3;
-	}
-
-
-	// Simple ones
-	iRtnValue += m_pPlayer->GetPlayerTraits()->IsSmaller() ? pEntry->GetCityGrowthModifier() * 2 : pEntry->GetCityGrowthModifier();
-	if(pEntry->RequiresPeace())
-	{
-		iRtnValue /= 2 + (m_pPlayer->GetDiplomacyAI()->IsGoingForWorldConquest() ? 1 : -1);
-	}
-
-	iRtnValue += (pEntry->GetBorderGrowthRateIncreaseGlobal() / 7) * MAX(pEntry->GetBorderGrowthRateIncreaseGlobal() / 7, iFlavorDefense - iFlavorOffense);
-	iRtnValue += (-pEntry->GetPlotCultureCostModifier() / 7) * MAX(-pEntry->GetPlotCultureCostModifier() / 7, iFlavorDefense - iFlavorOffense);
-
-	iRtnValue += (pEntry->GetCityRangeStrikeModifier() / 3) * MAX(pEntry->GetCityRangeStrikeModifier() / 3, iFlavorCityDefense - iFlavorOffense);
-
-	iRtnValue += (pEntry->GetFriendlyHealChange() * iFlavorDefense) / max(1, iFlavorOffense);
-
-	// Wonder production multiplier
-	if(pEntry->GetObsoleteEra() > 0)
-	{
-		if (pEntry->GetObsoleteEra() > GC.getGame().getCurrentEra())
+		CvPlayer& kLoopPlayer = GET_PLAYER((PlayerTypes)iPlayerLoop);
+		if (kLoopPlayer.isAlive() && iPlayerLoop != m_pPlayer->GetID() && GET_TEAM(m_pPlayer->getTeam()).isHasMet(kLoopPlayer.getTeam()))
 		{
-			iRtnValue += (pEntry->GetWonderProductionModifier() * pEntry->GetObsoleteEra()) / 5;
-		}
-	}
-	else
-	{
-		iRtnValue += pEntry->GetWonderProductionModifier() / 3;
-	}
-
-	if (m_pPlayer->GetPlayerTraits()->IsWarmonger() || m_pPlayer->GetPlayerTraits()->IsExpansionist())
-		iRtnValue += pEntry->GetUnitProductionModifier();
-	else
-		iRtnValue += pEntry->GetUnitProductionModifier() / 2;
-
-	// River happiness
-	if (pCity->plot()->isRiver())
-	{
-		iTempValue = pEntry->GetRiverHappiness() * iHappinessMultiplier;
-		if(iMinPop > 0)
-		{
-			if(pCity->getPopulation() >= iMinPop)
+			if (kLoopPlayer.GetProximityToPlayer(m_pPlayer->GetID()) >= PLAYER_PROXIMITY_CLOSE)
 			{
-				iTempValue *= 2;
-			}
-		}
-		iRtnValue += iTempValue;
-	}
+				int iProximityScore = kLoopPlayer.GetProximityToPlayer(m_pPlayer->GetID()) == PLAYER_PROXIMITY_NEIGHBORS ? 2 : 1;
+				iNumNeighbors += iProximityScore;
+				CvPlayerTraits* pLoopPlayerTraits = kLoopPlayer.GetPlayerTraits();
 
-	// Happiness per city
-	iTempValue = pEntry->GetHappinessPerCity() * iHappinessMultiplier;
-	if(iMinPop > 0)
-	{
-		if(pCity->getPopulation() >= iMinPop)
-		{
-			iTempValue *= 3;
-		}
-	}
-	iRtnValue += iTempValue;
+				int iNeighborWarScore = 0;
 
-	// Building class happiness
-	for(int jJ = 0; jJ < GC.getNumBuildingClassInfos(); jJ++)
-	{
-		iTempValue = pEntry->GetBuildingClassHappiness(jJ) * iHappinessMultiplier;
-		if(iMinFollowers > 0)
-		{
-			if(pCity->getPopulation() >= iMinFollowers)
-			{
-				iTempValue *= 2;
-			}
-		}
-		iRtnValue += iTempValue;
-	}
-
-	int iTotalRtnValue = iRtnValue;
-
-	ReligionTypes eReligion = m_pPlayer->GetReligions()->GetStateReligion(true);
-
-	////////////////////
-	// Expansion
-	///////////////////
-
-	int iCulture = pCity->getYieldRateTimes100(YIELD_CULTURE) * iIdealEmpireSize / 100;
-
-	bool bIsHolyCity = pCity->GetCityReligions()->IsHolyCityForReligion(eReligion);
-	if (!bIsHolyCity)
-	{
-		int iLoopUnit = 0;
-		CvUnit* pLoopUnit = NULL;
-		for (pLoopUnit = m_pPlayer->firstUnit(&iLoopUnit); pLoopUnit != NULL; pLoopUnit = m_pPlayer->nextUnit(&iLoopUnit))
-		{
-			if (pLoopUnit->getUnitInfo().IsFoundReligion())
-			{
-				if (pLoopUnit->plot()->getEffectiveOwningCity() == pCity)
+				if (m_pPlayer->IsAtWarWith((PlayerTypes)iPlayerLoop))
 				{
-					bIsHolyCity = true;
-					break;
+					int iWarScore = pDiploAI->GetWarScore((PlayerTypes)iPlayerLoop);
+					// base value of 4, more if we're losing, less if we're winning the war
+					iNeighborWarScore = max(1, 4 - (iWarScore / 2));
 				}
+				else if (kLoopPlayer.GetDiplomacyAI()->GetSurfaceApproach(m_pPlayer->GetID()) == CIV_APPROACH_HOSTILE)
+					iNeighborWarScore = 3;
+				else if (pLoopPlayerTraits->IsWarmonger() || kLoopPlayer.GetPlayerPolicies()->IsPolicyBranchUnlocked(eAuthority))
+					iNeighborWarScore = 2;
+
+				iNeighborWarmongerThreat += iProximityScore * iNeighborWarScore;
 			}
+
 		}
 	}
 
-	int iNumLuxuries = 0;
-	for (int iResourceLoop = 0; iResourceLoop < GC.getNumResourceInfos(); iResourceLoop++)
+	int iOffensePriority = pFlavorManager->GetPersonalityIndividualFlavor((FlavorTypes)GC.getInfoTypeForString("FLAVOR_OFFENSE")) / 2;
+	if (m_pPlayer->IsAtWar())
+		iOffensePriority += 2;
+	if (pDiploAI->IsGoingForWorldConquest())
+		iOffensePriority += 5;
+
+	if (iNumNeighbors == 0)
 	{
-		ResourceTypes eResource = static_cast<ResourceTypes>(iResourceLoop);
-		CvResourceInfo* pkResource = GC.getResourceInfo(eResource);
-		if (pkResource && pkResource->getResourceUsage() == RESOURCEUSAGE_LUXURY &&
-			(pCity->GetNumResourceLocal(eResource,false) > 0 || pCity->GetNumResourceLocal(eResource,true) > 0 || m_pPlayer->getNumResourceAvailable(eResource) > 0))
-		{
-			iNumLuxuries++;
-		}
+		iOffensePriority = 0;
 	}
 
-	int iFood = max(1, pCity->getYieldRateTimes100(YIELD_FOOD) * iIdealCityPop / 100);
-	iTempValue = 0;
-	for (int iI = 0; iI < NUM_YIELD_TYPES; iI++)
+	int iDefensePriority = (pFlavorManager->GetPersonalityIndividualFlavor((FlavorTypes)GC.getInfoTypeForString("FLAVOR_CITY_DEFENSE")) + pFlavorManager->GetPersonalityIndividualFlavor((FlavorTypes)GC.getInfoTypeForString("FLAVOR_DEFENSE"))) / 4;
+	iDefensePriority += iNeighborWarmongerThreat;
+
+	if (pDiploAI->IsGoingForWorldConquest())
+		iDefensePriority /= 4;
+
+	int iWonderPriority = pFlavorManager->GetPersonalityIndividualFlavor((FlavorTypes)GC.getInfoTypeForString("FLAVOR_WONDER")) / 2 + pDiploAI->GetWonderCompetitiveness() / 2;
+	iWonderPriority *= (100 + pPlayerTraits->GetWonderProductionModifier() + pPlayerTraits->GetWonderProductionModGA() / 3);
+	iWonderPriority /= 100;
+	if (pEntry->IsPantheonBelief())
 	{
-		if (pEntry->GetYieldPerPop(iI) > 0)
+		// for pantheons, modify wonder priority based on how much production our city has
+		int iOurProductionInCapital = m_pPlayer->getCapitalCity()->getYieldRateTimes100(YIELD_PRODUCTION, true);
+		int iHighestProductionOtherPlayers = 100;
+		for (int iPlayerLoop = 0; iPlayerLoop < MAX_MAJOR_CIVS; iPlayerLoop++)
 		{
-			iTempValue += iFood / pEntry->GetYieldPerPop(iI);
-			if (m_pPlayer->GetPlayerTraits()->IsPopulationBoostReligion())
+			CvPlayer& kLoopPlayer = GET_PLAYER((PlayerTypes)iPlayerLoop);
+			if (kLoopPlayer.isAlive() && iPlayerLoop != m_pPlayer->GetID() && kLoopPlayer.getCapitalCity())
 			{
-				iTempValue *= 2;
+				iHighestProductionOtherPlayers = max(iHighestProductionOtherPlayers, kLoopPlayer.getCapitalCity()->getYieldRateTimes100(YIELD_PRODUCTION, true));
 			}
 		}
-		if (bIsHolyCity)
-		{
-			if (pEntry->GetHolyCityYieldChange(iI) > 0)
-			{
-				iTempValue += pEntry->GetHolyCityYieldChange(iI);
-			}
-			int iTR = pEntry->GetYieldPerActiveTR(iI);
-			if (iTR > 0)
-			{
-				iTR = pEntry->GetYieldPerActiveTR(iI) *  pFlavorManager->GetPersonalityIndividualFlavor((FlavorTypes)GC.getInfoTypeForString("FLAVOR_DIPLOMACY"));
-				if (m_pPlayer->GetPlayerTraits()->IsSmaller() || m_pPlayer->GetPlayerTraits()->IsDiplomat())
-					iTR *= 5;
-
-				iTempValue += iTR;
-			}
-		}
-		if (pEntry->GetYieldPerLux(iI) > 0)
-		{
-			int ModifierValue = m_pPlayer->GetPlayerTraits()->IsExpansionist() ? 5 : 2;
-
-			if (m_pPlayer->GetPlayerTraits()->GetLuxuryHappinessRetention() || m_pPlayer->GetPlayerTraits()->GetUniqueLuxuryQuantity() != 0 || m_pPlayer->GetPlayerTraits()->IsImportsCountTowardsMonopolies())
-			{
-				ModifierValue += 2;
-			}
-			for (int iJ = 0; iJ < NUM_YIELD_TYPES; iJ++)
-			{
-				if (m_pPlayer->GetPlayerTraits()->GetYieldFromImport((YieldTypes)iJ) != 0)
-				{
-					ModifierValue += 2;
-				}
-				if (m_pPlayer->GetPlayerTraits()->GetYieldFromExport((YieldTypes)iJ) != 0)
-				{
-					ModifierValue += 2;
-				}
-			}
-
-			iTempValue += (pEntry->GetYieldPerLux(iI) * max(1, iNumLuxuries)) * ModifierValue;
-		}
-		if (pEntry->GetYieldPerBorderGrowth((YieldTypes)iI) > 0) // FIXME: also evaluate the yields that are scaling with era
-		{
-			int iVal = ((pEntry->GetYieldPerBorderGrowth((YieldTypes)iI) * iCulture) / max(4, pCity->GetJONSCultureLevel() * 4));
-			if (m_pPlayer->GetPlayerTraits()->IsExpansionist() && m_pPlayer->GetPlayerTraits()->GetExtraFoundedCityTerritoryClaimRange() == 0)
-			{
-				iVal *= 2;
-			}
-			else if (m_pPlayer->GetPlayerTraits()->IsSmaller())
-			{
-				iVal /= 2;
-			}
-			iTempValue += iVal;
-		}
+		iWonderPriority *= max(50, min(150, 100 * iOurProductionInCapital / iHighestProductionOtherPlayers));
+		iWonderPriority /= 100;
 	}
-
-	iTotalRtnValue += iTempValue;
-
-	////////////////////
-	// Great People
-	///////////////////
-	iTempValue = 0;
-	if (pCity->isCapital() || pCity->GetCityReligions()->IsHolyCityAnyReligion())
+	else if (GC.getGame().GetMedianTechsResearched() > 0)
 	{
-		for (int iJ = 0; iJ < GC.getNumGreatPersonInfos(); iJ++)
-		{
-			GreatPersonTypes eGP = (GreatPersonTypes)iJ;
-			if (eGP == NO_GREATPERSON)
-				continue;
-
-			if (pEntry->GetGreatPersonPoints(eGP) > 0)
-			{
-				iTempValue += (pEntry->GetGreatPersonPoints(eGP) * iFlavorGP) / 10;
-			}
-		}
-	}
-
-	iTotalRtnValue += iTempValue;
-
-	////////////////////
-	// Growth
-	///////////////////
-
-	iTempValue = 0;
-	for (int iI = 0; iI < NUM_YIELD_TYPES; iI++)
-	{
-		if (pEntry->GetYieldPerBirth(iI) > 0)
-		{
-			int iEvaluator = 400;
-			if (pEntry->IsPantheonBelief())
-			{
-				iEvaluator -= 50;
-			}
-			if (m_pPlayer->GetPlayerTraits()->IsSmaller())
-			{
-				iEvaluator -= 50;
-			}
-			if (m_pPlayer->GetPlayerTraits()->IsExpansionist() || m_pPlayer->GetPlayerTraits()->IsWarmonger())
-			{
-				iEvaluator += 50;
-			}
-			if (m_pPlayer->GetPlayerTraits()->IsPopulationBoostReligion())
-			{
-				iTempValue += 100;
-			}
-			iTempValue += (pEntry->GetYieldPerBirth(iI) * (iFood / max(1, iEvaluator)));
-		}
-		if (bIsHolyCity && pEntry->GetYieldPerHolyCityBirth(iI) > 0)
-		{
-			int iEvaluator = 400;
-			if (pEntry->IsPantheonBelief())
-			{
-				iEvaluator -= 50;
-			}
-			if (m_pPlayer->GetPlayerTraits()->IsSmaller())
-			{
-				iEvaluator -= 50;
-			}
-			if (m_pPlayer->GetPlayerTraits()->IsExpansionist() || m_pPlayer->GetPlayerTraits()->IsWarmonger())
-			{
-				iEvaluator += 50;
-			}
-			if (m_pPlayer->GetPlayerTraits()->IsPopulationBoostReligion())
-			{
-				iTempValue += 100;
-			}
-			iTempValue += (pEntry->GetYieldPerHolyCityBirth(iI) * (iFood / max(1, iEvaluator)));
-		}
-		if (pEntry->GetYieldFromWLTKD(iI) > 0)
-		{
-			iTempValue = pEntry->GetYieldFromWLTKD(iI) * 2;
-			if (m_pPlayer->GetPlayerTraits()->GetWLTKDGATimer() > 0)
-			{
-				iTempValue += m_pPlayer->GetPlayerTraits()->GetWLTKDGATimer() * 2;
-			}
-			if (m_pPlayer->GetPlayerTraits()->IsGPWLTKD())
-			{
-				iTempValue *= 5;
-			}
-			if (m_pPlayer->GetPlayerTraits()->GetWLTKDGPImprovementModifier() != 0)
-			{
-				iTempValue *= 5;
-			}
-			if (m_pPlayer->GetPlayerTraits()->GetPermanentYieldChangeWLTKD((YieldTypes)iI) > 0)
-			{
-				iTempValue *= 5;
-			}
-			if (m_pPlayer->GetPlayerTraits()->GetWLTKDCulture() != 0)
-			{
-				iTempValue *= 5;
-			}
-			if (m_pPlayer->GetPlayerTraits()->IsGreatWorkWLTKD())
-			{
-				iTempValue *= 5;
-			}
-			if (m_pPlayer->GetPlayerTraits()->IsExpansionWLTKD())
-			{
-				iTempValue *= 5;
-			}
-			if (pCity->GetWeLoveTheKingDayCounter() > 0)
-			{
-				iTempValue += pCity->GetWeLoveTheKingDayCounter();
-			}
-			if (pCity->GetYieldFromWLTKD((YieldTypes)iI) > 0)
-			{
-				iTempValue += pCity->GetYieldFromWLTKD((YieldTypes)iI);
-			}
-		}
-	}
-
-	iTotalRtnValue += iTempValue;
-
-	int iEraBonus = (GC.getNumEraInfos() - (int)m_pPlayer->GetCurrentEra());
-	iEraBonus /= 2;
-	if (iEraBonus <= 0)
-	{
-		iEraBonus = 1;
-	}
-
-	iTempValue = 0;
-	for (int iI = 0; iI < NUM_YIELD_TYPES; iI++)
-	{
-		YieldTypes eYield = static_cast<YieldTypes>(iI);
-
-		// Skip errata yields
-		if (!MOD_BALANCE_CORE_JFD && eYield >= YIELD_JFD_HEALTH)
-			break;
-
-		iRtnValue = 0;
-
-		// City yield change
-		iTempValue = pEntry->GetCityYieldChange(iI) * (iEraBonus + pCity->getPopulation());
-		if (iMinPop > 0 && pCity->getPopulation() >= iMinPop)
-		{
-			iTempValue *= 2;
-		}
-		iRtnValue += iTempValue;
-
-		if (pCity->isCapital())
-		{
-			iTempValue = pEntry->GetCapitalYieldChange(iI) * iEraBonus;
-			if (iMinPop > 0 && pCity->getPopulation() >= iMinPop)
-			{
-				iTempValue *= 2;
-			}
-			iRtnValue += iTempValue;
-		}
-
-		if (pCity->isCoastal())
-		{
-			iTempValue = pEntry->GetCoastalCityYieldChange(iI) * iEraBonus;
-			if (iMinPop > 0 && pCity->getPopulation() >= iMinPop)
-			{
-				iTempValue *= 2;
-			}
-			iRtnValue += iTempValue;
-		}
-
-		// Trade route yield change
-		iTempValue = pEntry->GetYieldChangeTradeRoute(iI) * iEraBonus;
-		if (iMinPop > 0 && pCity->getPopulation() >= iMinPop)
-		{
-			iTempValue *= 2;
-		}
-
-		if (pCity->IsRouteToCapitalConnected())
-		{
-			iTempValue *= 5;
-		}
-		iRtnValue += iTempValue;
-
-		// Specialist yield change
-		iTempValue = pEntry->GetYieldChangeAnySpecialist(iI) * iEraBonus;
-		if (iTempValue > 0) // Like it more with large cities
-		{
-			iTempValue += pCity->getPopulation();
-		}
-
-		if (pCity->GetCityCitizens()->GetSpecialistSlotsTotal() > 0)
-		{
-			iTempValue *= 2;
-		}
-		iRtnValue += iTempValue;
-
-		// Building class yield change
-		for (int iJ = 0; iJ < GC.getNumBuildingClassInfos(); iJ++)
-		{
-			BuildingClassTypes eBuildingClass = static_cast<BuildingClassTypes>(iJ);
-			const CvBuildingClassInfo* pkBuildingClassInfo = GC.getBuildingClassInfo(eBuildingClass);
-
-			iTempValue = pEntry->GetBuildingClassYieldChange(iJ, iI) * iEraBonus;
-			if (iMinFollowers > 0 && pCity->getPopulation() < iMinFollowers)
-			{
-				iTempValue /= 2;
-			}
-
-			if (pCity->HasBuildingClass(eBuildingClass))
-			{
-				iTempValue *= 2;
-			}
-
-			if (pkBuildingClassInfo && (isWorldWonderClass(*pkBuildingClassInfo) || isNationalWonderClass(*pkBuildingClassInfo)))
-			{
-				iTempValue /= 2;
-			}
-
-			iRtnValue += iTempValue;
-		}
-
-		// World wonder change
-		iRtnValue += pEntry->GetYieldChangeWorldWonder(iI) * m_pPlayer->GetDiplomacyAI()->GetWonderCompetitiveness();
-
-		// Yield per follower
-		if (pEntry->GetMaxYieldModifierPerFollower(iI) > 0)
-		{
-			iTempValue = pEntry->GetMaxYieldModifierPerFollower(iI) * (pCity->getPopulation() * pCity->getPopulation()) / 10;
-			iRtnValue += iTempValue;
-		}
-
-		// Yield per follower
-		if (pEntry->GetMaxYieldModifierPerFollowerPercent(iI) > 0)
-		{
-			iTempValue = pEntry->GetMaxYieldModifierPerFollowerPercent(iI) * (pCity->getPopulation() * pCity->getPopulation()) / 100;
-			iRtnValue += iTempValue;
-		}
-
-		if (pEntry->GetYieldPerConstruction(iI) > 0)
-		{
-			iTempValue = pEntry->GetYieldPerConstruction(iI) * (pCity->getPopulation() * pCity->getRawProductionPerTurnTimes100()) / 1000;
-			iRtnValue += iTempValue;
-		}
-
-		if (pEntry->GetYieldPerWorldWonderConstruction(iI) > 0)
-		{
-			iTempValue = pEntry->GetYieldPerWorldWonderConstruction(iI) * (pCity->getPopulation() * pCity->getRawProductionPerTurnTimes100()) / 2000;
-			iRtnValue += iTempValue;
-		}
-
-		iTotalRtnValue += iRtnValue;
-	}
-
-	return iTotalRtnValue;
-}
-
-int CvReligionAI::GetNumCitiesWithReligionCalculator(ReligionTypes eReligion, bool bForPantheon) const
-{
-	int iNumTotalCities = 0;
-	for (int iPlayerLoop = 0; iPlayerLoop < MAX_CIV_PLAYERS; iPlayerLoop++)
-	{
-		CvPlayer &kLoopPlayer = GET_PLAYER((PlayerTypes)iPlayerLoop);
-		if (kLoopPlayer.isAlive())
-		{
-			if (bForPantheon)
-			{
-				if (iPlayerLoop != m_pPlayer->GetID())
-					continue;
-			}
-
-			if (m_pPlayer->isMajorCiv() && m_pPlayer->GetDiplomacyAI()->IsBadTheftTarget(kLoopPlayer.GetID(), THEFT_TYPE_CONVERSION))
-				continue;
-
-			int iNumCities = 0;
-			int iLoop = 0;
-			CvCity* pLoopCity = NULL;
-			for (pLoopCity = kLoopPlayer.firstCity(&iLoop); pLoopCity != NULL; pLoopCity = kLoopPlayer.nextCity(&iLoop))
-			{
-				if (eReligion == NO_RELIGION)
-				{
-					//No faith? Let's get em!
-					if (pLoopCity->GetCityReligions()->GetReligiousMajority() <= RELIGION_PANTHEON)
-					{
-						iNumCities += 2;
-					}
-				}
-				else if (pLoopCity->GetCityReligions()->GetReligiousMajority() == eReligion)
-				{
-					iNumCities++;
-				}
-			}
-
-			//Emphasis on our own!
-			if (kLoopPlayer.GetID() == m_pPlayer->GetID())
-				iNumCities *= 2;
-
-			if (!kLoopPlayer.GetReligions()->OwnsReligion(true))
-			{
-				iNumCities *= 2;
-			}
-
-			if (kLoopPlayer.GetProximityToPlayer(m_pPlayer->GetID()) == PLAYER_PROXIMITY_CLOSE)
-			{
-				iNumCities /= 2;
-			}
-
-			if (kLoopPlayer.GetProximityToPlayer(m_pPlayer->GetID()) == PLAYER_PROXIMITY_FAR)
-			{
-				iNumCities /= 4;
-			}
-
-			if (kLoopPlayer.GetProximityToPlayer(m_pPlayer->GetID()) == PLAYER_PROXIMITY_DISTANT)
-			{
-				iNumCities /= 6;
-			}
-
-			iNumTotalCities += iNumCities;
-		}
-	}
-
-	//Let's make some predictions. Earlier in the game = more cities to make. And they'll all potentially be ours!
-	int iEraBonus = (GC.getNumEraInfos() - (int)m_pPlayer->GetCurrentEra());
-	if (iEraBonus <= 0)
-	{
-		iEraBonus = 1;
-	}
-	iNumTotalCities *= iEraBonus;
-	iNumTotalCities /= 2;
-
-	return iNumTotalCities;
-}
-
-/// AI's evaluation of this belief's usefulness to this player
-int CvReligionAI::ScoreBeliefForPlayer(CvBeliefEntry* pEntry, bool bReturnConquest, bool bReturnCulture, bool bReturnScience, bool bReturnDiplo) const
-{
-	int iRtnValue = 0;
-	CvGameReligions* pGameReligions = GC.getGame().GetGameReligions();
-
-	if (m_pPlayer->getCapitalCity() == NULL)
-		return 0;
-
-	// == Grand Strategy ==
-	int iDiploInterest = 0;
-	int iConquestInterest = 0;
-	int iScienceInterest = 0;
-	int iCultureInterest = 0;
-
-	int iGrandStrategiesLoop = 0;
-	AIGrandStrategyTypes eGrandStrategy;
-	CvAIGrandStrategyXMLEntry* pGrandStrategy = NULL;
-	CvString strGrandStrategyName;
-
-	// Loop through all GrandStrategies and get priority. Since these are usually 100+, we will divide by 10 later
-	for (iGrandStrategiesLoop = 0; iGrandStrategiesLoop < GC.GetGameAIGrandStrategies()->GetNumAIGrandStrategies(); iGrandStrategiesLoop++)
-	{
-		eGrandStrategy = (AIGrandStrategyTypes)iGrandStrategiesLoop;
-		pGrandStrategy = GC.GetGameAIGrandStrategies()->GetEntry(iGrandStrategiesLoop);
-		strGrandStrategyName = (CvString)pGrandStrategy->GetType();
-
-		if (strGrandStrategyName == "AIGRANDSTRATEGY_CONQUEST")
-		{
-			iConquestInterest += m_pPlayer->GetGrandStrategyAI()->GetGrandStrategyPriority(eGrandStrategy) / 10;
-		}
-		else if (strGrandStrategyName == "AIGRANDSTRATEGY_CULTURE")
-		{
-			iCultureInterest += m_pPlayer->GetGrandStrategyAI()->GetGrandStrategyPriority(eGrandStrategy) / 10;
-		}
-		else if (strGrandStrategyName == "AIGRANDSTRATEGY_UNITED_NATIONS")
-		{
-			iDiploInterest += m_pPlayer->GetGrandStrategyAI()->GetGrandStrategyPriority(eGrandStrategy) / 10;
-		}
-		else if (strGrandStrategyName == "AIGRANDSTRATEGY_SPACESHIP")
-		{
-			iScienceInterest += m_pPlayer->GetGrandStrategyAI()->GetGrandStrategyPriority(eGrandStrategy) / 10;
-		}
-	}
-	CvPlayerTraits* pPlayerTraits = m_pPlayer->GetPlayerTraits();
-
-	//let's establish some mid-game goals for the AI.
-	int iIdealCityPop = max(m_pPlayer->getCapitalCity()->getPopulation(), 30);
-	int iIdealEmpireSize = max(m_pPlayer->getNumCities(), GC.getMap().getWorldInfo().getTargetNumCities());
-	if (pPlayerTraits->IsSmaller())
-	{
-		iIdealCityPop += 5;
-		iIdealEmpireSize--;
-	}
-	if (pPlayerTraits->IsExpansionist())
-	{
-		iIdealCityPop -= 4;
-		iIdealEmpireSize += 5;
-	}
-	if (pPlayerTraits->IsWarmonger())
-	{
-		iIdealCityPop -= 2;
-		iIdealEmpireSize += 3;
-	}
-
-
-	if (pPlayerTraits->IsWarmonger())
-	{
-		iConquestInterest *= 3;
-		iScienceInterest *= 2;
-	}
-	if (pPlayerTraits->IsExpansionist())
-	{
-		iConquestInterest *= 2;
-		iCultureInterest *= 3;
-	}
-	if (pPlayerTraits->IsNerd())
-	{
-		iCultureInterest *= 2;
-		iScienceInterest *= 3;
-	}
-	if (pPlayerTraits->IsDiplomat())
-	{
-		iConquestInterest *= 2;
-		iDiploInterest *= 3;
-	}
-	if (pPlayerTraits->IsSmaller())
-	{
-		iCultureInterest *= 2;
-		iScienceInterest *= 3;
-	}
-	if (pPlayerTraits->IsTourism())
-	{
-		iCultureInterest *= 3;
-		iDiploInterest *= 2;
-	}
-	if (pPlayerTraits->IsReligious())
-	{
-		iCultureInterest *= 2;
-		iDiploInterest *= 3;
+		// for later beliefs, modify wonder priority based on whether we're ahead or behind in techs
+		iWonderPriority *= max(50, min(150, 100 * GET_TEAM(m_pPlayer->getTeam()).GetTeamTechs()->GetNumTechsKnown() / GC.getGame().GetMedianTechsResearched()));
+		iWonderPriority /= 100;
 	}
 
 	UnitClassTypes eMissionary = (UnitClassTypes)GC.getInfoTypeForString("UNITCLASS_MISSIONARY");
-	
+
 	//Trait-specific things to consider.
 	bool bNoMissionary = m_pPlayer->GetPlayerTraits()->NoTrain(eMissionary);
 	bool bNoNaturalSpread = m_pPlayer->GetPlayerTraits()->IsNoNaturalReligionSpread();
 	bool bForeignSpreadImmune = m_pPlayer->GetPlayerTraits()->IsForeignReligionSpreadImmune();
 
-	int iNumEnhancedReligions = pGameReligions->GetNumReligionsEnhanced();
-	int iReligionsEnhancedPercent = (100 * iNumEnhancedReligions) / GC.getMap().getWorldInfo().getMaxActiveReligions();
+	ReligionTypes eReligion = m_pPlayer->GetReligions()->GetStateReligion(false);
+	if (eForeignReligion != NO_RELIGION)
+		eReligion = eForeignReligion;
 
 	//Let's look at all cities and get their religious status. Gives us a feel for what we can expect to gain in the near future.
-	int iNumNearbyCities = GetNumCitiesWithReligionCalculator(m_pPlayer->GetReligions()->GetStateReligion(), pEntry->IsPantheonBelief());
+	int iNumOurCitiesWithReligion = GetNumCitiesWithReligion(eReligion, eReligion == NO_RELIGION && !pEntry->IsPantheonBelief(), eReligion == NO_RELIGION && pEntry->IsPantheonBelief(), true);
+	int iNumCitiesWithReligionTotal= GetNumCitiesWithReligion(eReligion, eReligion == NO_RELIGION && !pEntry->IsPantheonBelief(), eReligion == NO_RELIGION && pEntry->IsPantheonBelief(), false);
+	int iNumForeignCitiesWithOurReligion = iNumCitiesWithReligionTotal - iNumOurCitiesWithReligion;
 
-	ReligionTypes eReligion = m_pPlayer->GetReligions()->GetStateReligion(true);
+	int iNumNearbyCitiesToSpreadTo = 0;
+	int iEnemyReligionsNearby = 0;
+	// don't evaluate bonuses from spreading foreign religions
+	if (eForeignReligion == NO_RELIGION)
+	{
+		iNumNearbyCitiesToSpreadTo = GetNumCitiesToSpreadReligionTo(eReligion, eReligion == NO_RELIGION && !pEntry->IsPantheonBelief(), eReligion == NO_RELIGION && pEntry->IsPantheonBelief());
+
+		for (int iPlayerLoop = 0; iPlayerLoop < MAX_CIV_PLAYERS; iPlayerLoop++)
+		{
+			CvPlayer& kLoopPlayer = GET_PLAYER((PlayerTypes)iPlayerLoop);
+			if (iPlayerLoop != m_pPlayer->GetID() && kLoopPlayer.isAlive() && GET_TEAM(m_pPlayer->getTeam()).isHasMet(kLoopPlayer.getTeam()) && kLoopPlayer.GetReligions()->GetStateReligion(false) != NO_RELIGION)
+			{
+					iEnemyReligionsNearby += (int)kLoopPlayer.GetProximityToPlayer(m_pPlayer->GetID());
+			}
+		}
+		iEnemyReligionsNearby /= 2;
+
+	}
+
+	// what do we want to do with our faith?
+	// use it to buy GPs?
+	// use it to buy units?
+	// use it for spreading?
+
+	bool bReligionBuyUnitsFocus = false;
+	bool bReligionGPFocus = false;
+	bool bReligionSpreadFocus = false;
+
+	if (eForeignReligion != NO_RELIGION)
+	{
+		if (iOffensePriority > 5)
+		{
+			if (pPlayerTraits->IsCanPurchaseNavalUnitsFaith())
+				bReligionBuyUnitsFocus = true;
+			else
+			{
+				for (BeliefList::iterator it = vExistingBeliefs.begin(); it != vExistingBeliefs.end(); ++it)
+				{
+					CvBeliefEntry* pkBeliefInfo = GC.getBeliefInfo((BeliefTypes)*it);
+					if (pkBeliefInfo)
+					{
+						// Unlocks units?
+						for (int i = (int)m_pPlayer->GetCurrentEra(); i < GC.getNumEraInfos(); i++)
+						{
+							if (pEntry->IsFaithUnitPurchaseEra(i))
+							{
+								bReligionBuyUnitsFocus = true;
+								break;
+							}
+						}
+					}
+				}
+			}
+		}
+
+		if (!bNoMissionary && !bNoNaturalSpread)
+		{
+			if (eForeignReligion != NO_RELIGION)
+			{
+				if (iNumNearbyCitiesToSpreadTo > 0)
+				{
+					for (BeliefList::iterator it = vExistingBeliefs.begin(); it != vExistingBeliefs.end(); ++it)
+					{
+						CvBeliefEntry* pkBeliefInfo = GC.getBeliefInfo((BeliefTypes)*it);
+						if (pkBeliefInfo)
+						{
+							for (iI = 0; iI < NUM_YIELD_TYPES; iI++)
+							{
+								if (pkBeliefInfo->GetYieldFromSpread(iI) > 0 || pkBeliefInfo->GetYieldFromForeignSpread(iI) > 0)
+								{
+									bReligionSpreadFocus = true;
+									break;
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		if (!bReligionBuyUnitsFocus && !bReligionSpreadFocus && pDiploAI->IsGoingForCultureVictory())
+		{
+			bReligionGPFocus = true;
+		}
+	}
 
 	//////////////////
 	//Conquest-related player bonuses.
 	///////////////////////
 	int iWarTemp = 0;
-
-	int iNumNeighbors = 0;
-	for (int iPlayerLoop = 0; iPlayerLoop < MAX_MAJOR_CIVS; iPlayerLoop++)
+	int iNumUnits = m_pPlayer->getNumMilitaryUnits();
+	if (iOffensePriority > 0)
 	{
-		CvPlayer &kLoopPlayer = GET_PLAYER((PlayerTypes)iPlayerLoop);
-		if (kLoopPlayer.isAlive() && iPlayerLoop != m_pPlayer->GetID() && kLoopPlayer.isMajorCiv())
+		// modifiers
+		int iMaxDistanceMod = 100;
+		if (pEntry->GetMaxDistance() != 0)
 		{
-			if (kLoopPlayer.GetProximityToPlayer(m_pPlayer->GetID()) >= PLAYER_PROXIMITY_CLOSE)
-			{
-				iNumNeighbors++;
-				if (m_pPlayer->CanCrossOcean() && m_pPlayer->GetDiplomacyAI()->GetCivApproach((PlayerTypes)iPlayerLoop) <= CIV_APPROACH_GUARDED)
-				{
-					iNumNeighbors++;
-				}
-			}
+			iMaxDistanceMod = min(100, pEntry->GetMaxDistance() * 10);
 		}
-	}
 
-
-	if (iNumNeighbors > 0)
-	{
 		if (pEntry->GetFaithFromKills() > 0)
 		{
-			iWarTemp += ((pEntry->GetFaithFromKills() * iNumNeighbors * iNumNeighbors) / 20);
-
-			if (pEntry->GetMaxDistance() != 0)
+			iWarTemp += (iOffensePriority * iNumUnits * pEntry->GetFaithFromKills() * ScoreYieldForReligionTimes100(YIELD_FAITH) / 10000) * iMaxDistanceMod / 100;
+		}
+		for (iI = 0; iI < NUM_YIELD_TYPES; iI++)
+		{
+			if (pEntry->GetYieldFromBarbarianKills((YieldTypes)iI))
 			{
-				iWarTemp -= pEntry->GetMaxDistance() * 2;
+				iWarTemp += iOffensePriority * iNumUnits * pEntry->GetYieldFromBarbarianKills((YieldTypes)iI) * ScoreYieldForReligionTimes100((YieldTypes)iI) / 30000;
 			}
+			if (pEntry->GetYieldFromKills((YieldTypes)iI))
+			{
+				// modifiers
+				int iMaxDistanceMod = 100;
+				if (pEntry->GetMaxDistance() != 0)
+				{
+					iMaxDistanceMod = min(100, pEntry->GetMaxDistance() * 10);
+				}
+				iWarTemp += (iOffensePriority * iNumUnits * pEntry->GetYieldFromKills((YieldTypes)iI) * ScoreYieldForReligionTimes100((YieldTypes)iI) / 10000) * iMaxDistanceMod / 100;
+			}
+			if (pEntry->GetYieldFromConquest(iI) > 0)
+			{
+				iWarTemp += iOffensePriority * iNumUnits * pEntry->GetYieldFromConquest(iI) * ScoreYieldForReligionTimes100((YieldTypes)iI) / 100000;
+			}
+			if (pEntry->GetYieldFromRemoveHeresy((YieldTypes)iI) > 0)
+			{
+				iWarTemp += iOffensePriority * iNumUnits * pEntry->GetYieldFromRemoveHeresy((YieldTypes)iI) * ScoreYieldForReligionTimes100((YieldTypes)iI) / 50000;
+			}
+		}
+		if (pEntry->GetUnitProductionModifier() > 0)
+		{
+			iWarTemp += iOffensePriority * iNumUnits * pEntry->GetUnitProductionModifier() / 100;
+		}
+		if (pEntry->GetCombatModifierEnemyCities() > 0)
+		{
+			iWarTemp += iOffensePriority * iNumUnits * pEntry->GetCombatModifierEnemyCities() / 100;
+		}
+		if (pEntry->GetCombatVersusOtherReligionTheirLands() > 0)
+		{
+			iWarTemp += iOffensePriority * iNumUnits * pEntry->GetCombatVersusOtherReligionTheirLands() / 50;
+		}
+		if (pEntry->ConvertsBarbarians() && !bNoMissionary)
+		{
+			iWarTemp += iOffensePriority * iNumUnits / 10;
 		}
 
 		// Unlocks units?
@@ -9302,976 +9306,321 @@ int CvReligionAI::ScoreBeliefForPlayer(CvBeliefEntry* pEntry, bool bReturnConque
 				iNumUnlockEras++;
 			}
 		}
+		iWarTemp += iOffensePriority * iNumUnits * iNumUnlockEras / ((bReligionSpreadFocus || bReligionGPFocus) ? 3 : 1);
+	}
+	iRtnValue += iWarTemp;
 
-		iWarTemp += (iNumUnlockEras * iNumNeighbors);
 
-		int iNumUnits = m_pPlayer->getNumMilitaryUnits();
-		for (int iI = 0; iI < NUM_YIELD_TYPES; iI++)
+	//////////////////
+	//Defense-related player bonuses.
+	///////////////////////
+	int iDefenseTemp = 0;
+
+	if (pEntry->GetFriendlyHealChange() > 0)
+	{
+		iDefenseTemp += iDefensePriority * iNumUnits * pEntry->GetFriendlyHealChange() / 10;
+	}
+	if (pEntry->GetCityRangeStrikeModifier() > 0)
+	{
+		iDefenseTemp += iDefensePriority * m_pPlayer->getNumCities() * pEntry->GetCityRangeStrikeModifier() / 2;
+	}
+	if (pEntry->GetUnitProductionModifier() > 0)
+	{
+		iDefenseTemp += iDefensePriority * pEntry->GetUnitProductionModifier();
+	}
+	for (iI = 0; iI < NUM_YIELD_TYPES; iI++)
+	{
+		if (pEntry->GetYieldPerHeal((YieldTypes)iI))
 		{
-			if (pEntry->GetYieldPerHeal(iI) > 0)
-			{
-				iWarTemp += (pEntry->GetYieldPerHeal(iI) * iNumUnits) / 3;
-			}
-			if (pEntry->GetYieldFromConquest(iI) > 0)
-			{
-				iWarTemp += (pEntry->GetYieldFromConquest(iI) * iNumNeighbors) / 4;
-			}
-			if (pEntry->GetYieldFromConquest(iI) > 0)
-			{
-				iWarTemp += (pEntry->GetYieldFromRemoveHeresy((YieldTypes)iI) * iNumNeighbors);
-			}
-			if (pEntry->GetYieldFromKills((YieldTypes)iI))
-			{
-				iWarTemp += (pEntry->GetYieldFromKills((YieldTypes)iI) * iNumNeighbors) / 2;
-
-				if (pEntry->GetMaxDistance() != 0)
-				{
-					iWarTemp -= pEntry->GetMaxDistance();
-				}
-				if (m_pPlayer->GetYieldFromKills((YieldTypes)iI) > 0)
-				{
-					iWarTemp *= 4;
-				}
-				if (m_pPlayer->GetYieldFromBarbarianKills((YieldTypes)iI) > 0)
-				{
-					iWarTemp *= 4;
-				}
-			}
+			iDefenseTemp += iDefensePriority * pEntry->GetYieldPerHeal((YieldTypes)iI) * ScoreYieldForReligionTimes100((YieldTypes)iI) / 50000;
 		}
+	}
+	if (pEntry->GetCombatVersusOtherReligionOwnLands() > 0)
+	{
+		iDefenseTemp += iDefensePriority * pEntry->GetCombatVersusOtherReligionOwnLands() / 50;
+	}
 
-		if (pEntry->GetCombatModifierFriendlyCities() > 0)
-		{
-			iWarTemp += (pEntry->GetCombatModifierFriendlyCities() * iIdealEmpireSize * iNumNeighbors) / 2;
-		}
+	iRtnValue += iDefenseTemp;
 
-		if (pEntry->GetCombatModifierEnemyCities() > 0)
+	//////////////////
+	//Wonder-related player bonuses.
+	///////////////////////
+	int iWonderTemp = 0;
+	if (pEntry->GetWonderProductionModifier() > 0)
+	{
+		iWonderTemp = iWonderPriority * pEntry->GetWonderProductionModifier();
+		if (pEntry->GetObsoleteEra() > 0)
 		{
-			iWarTemp += (pEntry->GetCombatModifierEnemyCities() * iNumNeighbors) * 2;
-		}
-
-		if (pEntry->GetCombatVersusOtherReligionOwnLands() > 0)
-		{
-			iWarTemp += (pEntry->GetCombatVersusOtherReligionOwnLands() * iIdealEmpireSize * iNumNeighbors) / 4;
-		}
-
-		if (pEntry->GetCombatVersusOtherReligionTheirLands() > 0)
-		{
-			iWarTemp += (pEntry->GetCombatVersusOtherReligionTheirLands() * iNumNeighbors) * 2;
-		}
-
-		MilitaryAIStrategyTypes eStrategyBarbs = (MilitaryAIStrategyTypes)GC.getInfoTypeForString("MILITARYAISTRATEGY_ERADICATE_BARBARIANS");
-		if (m_pPlayer->GetMilitaryAI()->IsUsingStrategy(eStrategyBarbs))
-		{
-			if (pEntry->ConvertsBarbarians() && !bNoMissionary)
+			if (pEntry->GetObsoleteEra() > GC.getGame().getCurrentEra())
 			{
-				iWarTemp *= 2;
+				iWonderTemp *= pEntry->GetObsoleteEra() - GC.getGame().getCurrentEra();
+				iWonderTemp /= 5;
 			}
-		}
-
-		if (eReligion != NO_RELIGION)
-		{
-			const CvReligion* pReligion = GC.getGame().GetGameReligions()->GetReligion(eReligion, m_pPlayer->GetID());
-			if (pReligion)
+			else
 			{
-				CvCity* pHolyCity = pReligion->GetHolyCity();
-
-				if (pReligion->m_Beliefs.GetFaithFromKills(-1, m_pPlayer->GetID(), pHolyCity) > 0)
-				{
-					iWarTemp *= 2;
-				}
-				if (pReligion->m_Beliefs.GetCombatModifierEnemyCities(m_pPlayer->GetID(), pHolyCity) > 0)
-				{
-					iWarTemp *= 2;
-				}
-				if (pReligion->m_Beliefs.GetCombatModifierFriendlyCities(m_pPlayer->GetID(), pHolyCity) > 0)
-				{
-					iWarTemp *= 2;
-				}
-				if (pReligion->m_Beliefs.GetCombatVersusOtherReligionOwnLands(m_pPlayer->GetID(), pHolyCity) > 0)
-				{
-					iWarTemp *= 2;
-				}
-				if (pReligion->m_Beliefs.GetCombatVersusOtherReligionTheirLands(m_pPlayer->GetID(), pHolyCity) > 0)
-				{
-					iWarTemp *= 2;
-				}
-				for (int iI = 0; iI < NUM_YIELD_TYPES; iI++)
-				{
-					const YieldTypes eYield = static_cast<YieldTypes>(iI);
-					if (eYield != NO_YIELD)
-					{
-						if (pReligion->m_Beliefs.GetYieldFromKills(eYield, m_pPlayer->GetID()) > 0)
-						{
-							iWarTemp *= 2;
-						}
-					}
-				}
+				iWonderTemp = 0;
 			}
-		}
-
-		if (m_pPlayer->IsAtWarAnyMajor() || m_pPlayer->GetDiplomacyAI()->GetMeanness() > 6)
-			iWarTemp *= 5;
-
-		if (!bForeignSpreadImmune)
-		{
-			int iForeignReligions = 0;
-			int iLoop = 0;
-			CvCity* pLoopCity = NULL;
-			for (pLoopCity = m_pPlayer->firstCity(&iLoop); pLoopCity != NULL; pLoopCity = m_pPlayer->nextCity(&iLoop))
-			{
-				if (pLoopCity->GetCityReligions()->IsReligionHereOtherThan(eReligion, 1))
-					iForeignReligions++;
-			}
-
-			int iInquisitor = 0;
-			for (int iI = 0; iI < NUM_YIELD_TYPES; iI++)
-			{
-				iInquisitor += pEntry->GetYieldFromRemoveHeresy((YieldTypes)iI);
-				
-			}
-
-			if (iForeignReligions > 0 )
-				iInquisitor *= iForeignReligions;
-			
-			iWarTemp += iInquisitor;
-
-			iWarTemp += (pEntry->GetInquisitorCostModifier() * -1 * max(1, iForeignReligions));
 		}
 	}
 
-	////////////////////
+	for (iI = 0; iI < NUM_YIELD_TYPES; iI++)
+	{
+		if (pEntry->GetYieldPerWorldWonderConstruction(iI) > 0)
+		{
+			iWonderTemp += iWonderPriority * pEntry->GetYieldPerWorldWonderConstruction(iI) * ScoreYieldForReligionTimes100((YieldTypes)iI) / 5000;
+		}
+		if (pEntry->GetYieldChangeWorldWonder(iI) > 0)
+		{
+			// current wonders give bonuses now, add small value for future wonders
+			iWonderTemp += (iWonderPriority + 10 * m_pPlayer->GetNumWonders()) * pEntry->GetYieldChangeWorldWonder(iI) * ScoreYieldForReligionTimes100((YieldTypes)iI) / 100;
+		}
+	}
+	iRtnValue += iWonderTemp;
+
+	//////////////////
 	// Happiness
-	///////////////////
-
+	///////////////////////
 	int iHappinessTemp = 0;
-	if (pEntry->GetPlayerHappiness() > 0)
-	{
-		iHappinessTemp += max(0, pEntry->GetPlayerHappiness() * iIdealEmpireSize);
-	}
-	if (pEntry->GetHappinessPerFollowingCity() > 0)
-	{
-		int iFloatToInt = (int)((pEntry->GetHappinessPerFollowingCity() * (iNumNearbyCities + iIdealEmpireSize)) / 5);
-		iHappinessTemp += max(0, iFloatToInt);
-	}
-
-	if (pEntry->GetFullyConvertedHappiness() > 0)
-	{
-		int iTemp = (pEntry->GetFullyConvertedHappiness() * iIdealEmpireSize * (m_pPlayer->GetPlayerTraits()->IsReligious() ? 4 : 2));
-		iHappinessTemp += max(0, iTemp);
-	}
-
+	int iHappinessValue = m_pPlayer->GetHappinessValue();
 	if (pEntry->GetHappinessPerPantheon() > 0)
 	{
-		int iPantheons = 0;
-		for (int iI = 0; iI < MAX_MAJOR_CIVS; iI++)
-		{
-			// Only civs we have met
-			if (GET_TEAM(m_pPlayer->getTeam()).isHasMet(GET_PLAYER((PlayerTypes)iI).getTeam()))
-			{
-				if (GET_PLAYER((PlayerTypes)iI).GetReligions()->HasCreatedPantheon())
-				{
-					iPantheons++;
-				}
-			}
-		}
+		int iPantheon = GC.getGame().GetGameReligions()->GetNumPantheonsCreated();
+		// are we founding a pantheon?
+		if (eForeignReligion == NO_RELIGION && eReligion == NO_RELIGION && pEntry->IsPantheonBelief())
+			iPantheon++;
 
-		iHappinessTemp += (pEntry->GetHappinessPerPantheon() * max(3, iPantheons) * (15 - iIdealEmpireSize));
+		if (iPantheon > 8)
+		{
+			iPantheon = 8;
+		}
+		// current pantheons
+		iHappinessTemp += 10 * iPantheon * pEntry->GetHappinessPerPantheon() * iHappinessValue;
+		// future pantheons
+		iHappinessTemp += 5 * (8 - iPantheon) * pEntry->GetHappinessPerPantheon() * iHappinessValue;
 	}
+	iRtnValue += iHappinessTemp;
 
-	////////////////////
-	// Culture
-	///////////////////
+	//////////////////
+	//Spread bonuses.
+	///////////////////////
 
-	int iCultureTemp = 0;
-
-	// int iCulture = m_pPlayer->GetTotalJONSCulturePerTurnTimes100() * iIdealEmpireSize / 100;
-	// iCulture /= 5;
-
-	////////////////////
-	// Science
-	///////////////////
-
-	int iScienceTemp = 0;
-	int iScience = m_pPlayer->GetScience() * 100 * iIdealEmpireSize;
-	iScience /= 10;
-
-	for (int iI = 0; iI < NUM_YIELD_TYPES; iI++)
-	{
-		if (pEntry->GetYieldPerScience(iI) > 0)
-		{		
-			iScienceTemp += (iScience / pEntry->GetYieldPerScience(iI));
-		}
-		if (pEntry->GetYieldFromEraUnlock(iI) > 0)
-		{
-			iScienceTemp += (pEntry->GetYieldFromEraUnlock(iI) * (GC.getNumEraInfos() - m_pPlayer->GetCurrentEra()));
-			//Big numbers skew value.
-			iScienceTemp /= ((m_pPlayer->GetCurrentEra() +1) * 2);
-		}
-		if (m_pPlayer->GetPlayerTraits()->IsPermanentYieldsDecreaseEveryEra())
-		{
-			iScienceTemp /= 2;
-		}
-	}
-	////////////////////
-	// Gold
-	///////////////////
-
-	int iGoldTemp = 0;
-	int iGrossGold = max(15, (m_pPlayer->GetTreasury()->CalculateGrossGold() * iIdealEmpireSize));
-	for (int iI = 0; iI < NUM_YIELD_TYPES; iI++)
-	{
-		if (pEntry->GetYieldPerGPT(iI) > 0)
-		{
-			iGoldTemp += (iGrossGold / pEntry->GetYieldPerGPT(iI));
-		}
-		if (pEntry->GetYieldFromRemoveHeresy(YIELD_GOLD) > 0)
-		{
-			iGoldTemp += pEntry->GetYieldFromRemoveHeresy(YIELD_GOLD) / 25;
-		}
-	}
-
-	////////////////////
-	// Spread
-	///////////////////
-
-	int iSpreadTemp = 0;
-	int iMissionary = 0;
-
+	int iPassiveSpreadTemp = 0;
 	if (!bNoNaturalSpread)
 	{
 		if (pEntry->GetPressureChangeTradeRoute() != 0 && !m_pPlayer->GetPlayerTraits()->IsNoOpenTrade())
 		{
-			iSpreadTemp += (pEntry->GetPressureChangeTradeRoute() * m_pPlayer->GetTrade()->GetNumTradeRoutesPossible()) / 2;
+			iPassiveSpreadTemp += (pEntry->GetPressureChangeTradeRoute() * m_pPlayer->GetTrade()->GetNumTradeRoutesPossible()) / 2;
 			if (m_pPlayer->GetPlayerTraits()->GetNumTradeRoutesModifier() != 0)
 			{
-				iSpreadTemp *= 2;
+				iPassiveSpreadTemp *= 100 + m_pPlayer->GetPlayerTraits()->GetNumTradeRoutesModifier() ;
+				iPassiveSpreadTemp /= 100;
 			}
 		}
-
-		if (m_pPlayer->GetDiplomacyAI()->GetMeanness() <= 6)
+		if (pEntry->GetSpreadDistanceModifier() != 0)
 		{
-			iSpreadTemp += (pEntry->GetHappinessPerXPeacefulForeignFollowers()) * 5;
+			iPassiveSpreadTemp += pEntry->GetSpreadDistanceModifier() * iNumCitiesWithReligionTotal;
 		}
-
-		iSpreadTemp += (pEntry->GetSciencePerOtherReligionFollower()) * 2;
-
-		iSpreadTemp += (pEntry->GetGoldPerFollowingCity()) * 2;
-
-		iSpreadTemp += (pEntry->GetGoldPerXFollowers()) * 3;
-
-		iSpreadTemp += (pEntry->GetGoldWhenCityAdopts()) / 2;
-
-		iSpreadTemp += (pEntry->GetSpreadDistanceModifier()) / 2;
-
-		iSpreadTemp += (pEntry->GetSpreadStrengthModifier()) / 2;
-
-		if (pEntry->GetSpreadModifierDoublingTech() != NO_TECH && GET_TEAM(m_pPlayer->getTeam()).GetTeamTechs()->HasTech(pEntry->GetSpreadModifierDoublingTech()))
-		{
-			iSpreadTemp *= 2;
-		}
-
-		iMissionary += (pEntry->GetMissionaryStrengthModifier()) / 2;
-		iMissionary += (-1 * pEntry->GetMissionaryCostModifier()) / 2;
-		iMissionary += pEntry->GetMissionaryInfluenceCS();
-
-		for (int iI = 0; iI < NUM_YIELD_TYPES; iI++)
-		{
-			iMissionary += pEntry->GetYieldFromSpread(iI) / 5;
-
-			iMissionary += pEntry->GetYieldFromForeignSpread(iI) / 5;
-
-			iMissionary += pEntry->GetYieldFromConversion(iI) / 5;
-
-			iMissionary += pEntry->GetYieldFromConversionExpo(iI) / 5;
-
-		}
-
-		//Best for high faith civs.
-		if (iMissionary > 0)
-			iMissionary += ((m_pPlayer->GetTotalFaithPerTurnTimes100() * iIdealEmpireSize / 100) / 2);
-
-		if (m_pPlayer->GetDiplomacyAI()->GetMeanness() > 6)
-		{
-			iMissionary /= 2;
-		}
-
-		iSpreadTemp += iMissionary;
-
-		if (pEntry->GetProphetStrengthModifier() != 0 || pEntry->GetProphetCostModifier() != 0)
-		{
-			int iProphet = 0;
-			iProphet += (pEntry->GetProphetStrengthModifier()) / 2;
-			iProphet += (-1 * pEntry->GetProphetCostModifier()) / 2;
-
-			for (int iI = 0; iI < NUM_YIELD_TYPES; iI++)
-			{
-				iProphet += pEntry->GetYieldFromSpread(iI) / 4;
-
-				iProphet += pEntry->GetYieldFromForeignSpread(iI) / 5;
-
-				iProphet += pEntry->GetYieldFromConversion(iI) / 4;
-
-				iProphet += pEntry->GetYieldFromConversionExpo(iI) / 4;
-			}
-
-			//Best for high faith civs.
-			if (iProphet > 0)
-				iProphet += m_pPlayer->GetTotalFaithPerTurnTimes100() * iIdealEmpireSize / 100;
-
-			iSpreadTemp += iProphet;
-		}
-
-		if (pEntry->GetFriendlyCityStateSpreadModifier() != 0)
-		{
-			int iSpreadTempCS = (pEntry->GetFriendlyCityStateSpreadModifier() * (m_pPlayer->GetNumCSFriends() + GC.getGame().GetNumMinorCivsAlive())) / 2;
-			iSpreadTemp += iSpreadTempCS;
-		}
-
-		if (pEntry->GetSpyPressure() != 0)
-		{
-			iSpreadTemp += (pEntry->GetSpyPressure() * m_pPlayer->GetEspionage()->GetNumSpies());
-			iSpreadTemp /= 2;
-
-			if (m_pPlayer->GetEspionageModifier() != 0)
-			{
-				iSpreadTemp *= 2;
-			}
-		}
-
-		if (!bForeignSpreadImmune)
-		{
-			iSpreadTemp += (pEntry->GetInquisitorPressureRetention() / 5);
-			iSpreadTemp += (pEntry->GetOtherReligionPressureErosion() / 5);
-		}
-
-		int iSpreadYields = 0;
-		int iSpreadYieldsLocal = 0;
-		// Yields for followers and follower cities
-		for (int iI = 0; iI < NUM_YIELD_TYPES; iI++)
-		{
-			iSpreadYieldsLocal += pEntry->GetYieldFromFaithPurchase(iI) * 2;
-
-			iSpreadYields += pEntry->GetYieldChangePerForeignCity(iI) * 2;
-
-			iSpreadYields += pEntry->GetYieldChangePerXForeignFollowers(iI) * 2;
-
-			if (pEntry->GetYieldChangePerXCityStateFollowers(iI) > 0)
-				iSpreadYields += pEntry->GetYieldChangePerXCityStateFollowers(iI) * (m_pPlayer->GetNumCSFriends() + GC.getGame().GetNumMinorCivsAlive()) / 2;
-
-			if (pEntry->GetMaxYieldPerFollowerPercent(iI) > 0)
-			{
-				iSpreadYieldsLocal += pEntry->GetMaxYieldPerFollowerPercent(iI) * 25 / max(1, 100 - pEntry->GetMaxYieldPerFollower((YieldTypes)iI));
-			}
-			else
-			{
-				if (pEntry->GetYieldPerXFollowers((YieldTypes)iI) > 0)
-				{
-					int iVal = iIdealCityPop / pEntry->GetYieldPerXFollowers((YieldTypes)iI);
-					iVal *= 100;
-					iVal /= (100 + max(0, (2 * (iIdealCityPop - m_pPlayer->getCapitalCity()->getPopulation()))));
-
-					if (iVal > pEntry->GetMaxYieldPerFollower(iI))
-					{
-						iVal = pEntry->GetMaxYieldPerFollower(iI);
-					}
-					if (pEntry->IsPantheonBelief())
-						iVal /= 4;
-
-					iSpreadYieldsLocal += iVal;
-				}
-			}
-		}
-
-
-		iSpreadYieldsLocal = (iSpreadYieldsLocal * max(m_pPlayer->getNumCities(), (iIdealCityPop / iIdealEmpireSize))) / 2;
-
-		if (bNoNaturalSpread)
-			iSpreadYields = 0;
-
-		iSpreadTemp += iSpreadYields;
-
-		if (iSpreadTemp > 0)
-		{
-			//Subtract the % of enhanced faiths. More enhanced = less room for spread.
-			iSpreadTemp *= (100 - iReligionsEnhancedPercent);
-			iSpreadTemp /= 100;
-
-			//Increase based on nearby cities that lack our faith.
-			iSpreadTemp *= max(1, iNumNearbyCities);
-			//Divide by estimated total # of cities on map.
-			iSpreadTemp /= GC.getMap().getWorldInfo().GetEstimatedNumCities();
-		}
-
-		iSpreadTemp += iSpreadYieldsLocal;
-	}
-
-	////////////////////
-	// Great People
-	///////////////////
-
-	int iGPTemp = 0;
-
-	for (int iJ = 0; iJ < GC.getNumGreatPersonInfos(); iJ++)
-	{
-		GreatPersonTypes eGP = (GreatPersonTypes)iJ;
-		if (eGP == NO_GREATPERSON)
-			continue;
-
-		if (pEntry->GetGoldenAgeGreatPersonRateModifier(eGP) > 0)
-		{
-			iGPTemp += pEntry->GetGoldenAgeGreatPersonRateModifier(eGP) * 2;
-		}
-
-		for (int iI = 0; iI < NUM_YIELD_TYPES; iI++)
-		{
-			if (pEntry->GetGreatPersonExpendedYield(eGP, iI) > 0)
-			{
-				iGPTemp += pEntry->GetGreatPersonExpendedYield(eGP, iI) * 2;
-			}
-		}
-	}
-	for (int iI = 0; iI < NUM_YIELD_TYPES; iI++)
-	{
-		if (pEntry->GetYieldFromGPUse(iI) > 0)
-		{
-			iGPTemp += pEntry->GetYieldFromGPUse(iI) * 2;
-		}
-
-		for (int iJ = 0; iJ < GC.getNumSpecialistInfos(); iJ++)
-		{
-			if (pEntry->GetSpecialistYieldChange((SpecialistTypes)iJ, iI) > 0)
-			{
-				iGPTemp += (pEntry->GetSpecialistYieldChange((SpecialistTypes)iJ, iI) * 5);
-			}
-		}
-	}
-
-	iGPTemp += pEntry->GetGreatPersonExpendedFaith();
-
-	if (iGPTemp != 0 && m_pPlayer->getGreatPeopleRateModifier() != 0)
-	{
-		iGPTemp += m_pPlayer->getGreatPeopleRateModifier() * 2;
-	}
-
-	if (pEntry->FaithPurchaseAllGreatPeople())
-	{
-		int iTemp = 0;
-
-		// Count the number of policies we DON'T have that unlock Great People, for the time being we won't worry about multiple policies unlocking the same GP
-		for (int iPolicyLoop = 0; iPolicyLoop < m_pPlayer->GetPlayerPolicies()->GetPolicies()->GetNumPolicies(); iPolicyLoop++)
-		{
-			const PolicyTypes eLoopPolicy = static_cast<PolicyTypes>(iPolicyLoop);
-			CvPolicyEntry* pkLoopPolicyInfo = GC.getPolicyInfo(eLoopPolicy);
-			if (pkLoopPolicyInfo && !m_pPlayer->HasPolicy(eLoopPolicy))
-			{
-				// We don't have this policy, but does it permit any GP to be bought with faith
-				if (pkLoopPolicyInfo->HasFaithPurchaseUnitClasses())
-				{
-					iTemp++;
-				}
-			}
-		}
-
-		iGPTemp += (iTemp * 10);
-	}
-
-	if (eReligion != NO_RELIGION)
-	{
-		const CvReligion* pReligion = GC.getGame().GetGameReligions()->GetReligion(eReligion, m_pPlayer->GetID());
-		if (pReligion)
-		{
-			CvCity* pHolyCity = pReligion->GetHolyCity();
-
-			if (pReligion->m_Beliefs.GetGreatPersonExpendedFaith(m_pPlayer->GetID(), pHolyCity) > 0)
-			{
-				iGPTemp += (pReligion->m_Beliefs.GetGreatPersonExpendedFaith(m_pPlayer->GetID(), pHolyCity) / 2);
-			}
-			for (int iJ = 0; iJ < GC.getNumGreatPersonInfos(); iJ++)
-			{
-				GreatPersonTypes eGP = (GreatPersonTypes)iJ;
-				if (eGP == NO_GREATPERSON)
-					continue;
-
-				if (pReligion->m_Beliefs.GetGoldenAgeGreatPersonRateModifier(eGP, m_pPlayer->GetID(), pHolyCity) > 0)
-				{
-					iGPTemp += pReligion->m_Beliefs.GetGoldenAgeGreatPersonRateModifier(eGP, m_pPlayer->GetID(), pHolyCity);
-				}
-
-				for (uint ui = 0; ui < NUM_YIELD_TYPES; ui++)
-				{
-					YieldTypes yield = (YieldTypes)ui;
-
-					if (yield == NO_YIELD)
-						continue;
-
-					if (pReligion->m_Beliefs.GetGreatPersonExpendedYield(eGP, yield, m_pPlayer->GetID(), pHolyCity) > 0)
-					{
-						iGPTemp += (pReligion->m_Beliefs.GetGreatPersonExpendedYield(eGP, yield, m_pPlayer->GetID(), pHolyCity) / 2);
-					}
-				}
-			}
-		}
-	}
-	
-	////////////////////
-	// Buildings
-	///////////////////
-
-	int iBuildingTemp = 0;
-	BuildingClassTypes eFaithBuildingClass = NO_BUILDINGCLASS;
-
-	if (eReligion != NO_RELIGION)
-	{
-		const CvReligion* pReligion = GC.getGame().GetGameReligions()->GetReligion(eReligion, m_pPlayer->GetID());
-		if (pReligion != NULL)
-		{
-			CvCity* pHolyCity = pReligion->GetHolyCity();
-
-			eFaithBuildingClass = FaithBuildingAvailable(eReligion, pHolyCity);
-			for (int iI = 0; iI < GC.getNumBuildingClassInfos(); iI++)
-			{
-				if (pEntry->IsBuildingClassEnabled(iI))
-				{
-					BuildingTypes eBuilding = (BuildingTypes)m_pPlayer->getCivilizationInfo().getCivilizationBuildings(iI);
-					if (eBuilding != NO_BUILDING)
-					{
-						CvBuildingEntry* pBuildingEntry = GC.getBuildingInfo(eBuilding);
-
-						////Sanity and AI Optimization Check
-						int iSanity = pEntry->IsFollowerBelief() ? 6 : 1;
-
-						if (FaithBuildingAvailable(eReligion, pHolyCity == NULL ? m_pPlayer->getCapitalCity() : pHolyCity) == NO_BUILDINGCLASS)
-						{
-							iSanity = pEntry->IsFollowerBelief() ? 25 : 2;
-						}
-
-						if (pHolyCity != NULL)
-						{
-							int iValue = pHolyCity->GetCityStrategyAI()->GetBuildingProductionAI()->CheckBuildingBuildSanity(eBuilding, iSanity, false, true, true);
-							if (iValue > 0)
-								iBuildingTemp += iValue;
-						}
-						else
-						{
-							int iValue = m_pPlayer->getCapitalCity()->GetCityStrategyAI()->GetBuildingProductionAI()->CheckBuildingBuildSanity(eBuilding, iSanity, true, true, true);
-							if (iValue > 0)
-								iBuildingTemp += iValue;
-						}
-
-						//Do we already have a faith building? Let's not double down.									
-						//If the byzantines, let's get two national wonders!
-						if (m_pPlayer->GetPlayerTraits()->IsBonusReligiousBelief())
-						{
-							if (pBuildingEntry->IsReformation())
-							{
-								iBuildingTemp *= 10;
-							}
-						}
-						else if (eFaithBuildingClass != NO_BUILDINGCLASS)
-						{
-							//Only penalize if we're considering getting a second faith building.
-							if (!pBuildingEntry->IsReformation())
-							{
-								iBuildingTemp /= 5;
-							}
-						}
-
-						//special case for Orders...we really only want this if we're a warmonger.
-						if (pBuildingEntry->GetFreePromotion() != NO_PROMOTION)
-						{
-							if (!m_pPlayer->GetPlayerTraits()->IsWarmonger())
-								iBuildingTemp /= 10;
-						}
-					}
-				}
-			}
-
-			if (pEntry->GetFaithBuildingTourism() > 0)
-			{
-				int iLoop = 0;
-				CvCity* pLoopCity = NULL;
-				for (pLoopCity = m_pPlayer->firstCity(&iLoop); pLoopCity != NULL; pLoopCity = m_pPlayer->nextCity(&iLoop))
-				{
-					if (pLoopCity->GetCityBuildings()->GetNumBuildingsFromFaith() > 0)
-					{
-						iBuildingTemp += max(1, (pEntry->GetFaithBuildingTourism() * pLoopCity->GetCityBuildings()->GetNumBuildingsFromFaith() * 5));
-					}
-				}
-			}
-
-			int iLoop = 0;
-			CvCity* pLoopCity = NULL;
-			for (pLoopCity = m_pPlayer->firstCity(&iLoop); pLoopCity != NULL; pLoopCity = m_pPlayer->nextCity(&iLoop))
-			{
-
-				int iEraBonus = (GC.getNumEraInfos() - (int)m_pPlayer->GetCurrentEra());
-				int iGW = pLoopCity->GetCityBuildings()->GetNumAvailableGreatWorkSlots() + iEraBonus + 1;
-				if (iGW > 0)
-				{
-					for (uint ui = 0; ui < NUM_YIELD_TYPES; ui++)
-					{
-						YieldTypes yield = (YieldTypes)ui;
-
-						if (yield == NO_YIELD)
-							continue;
-
-						if (pEntry->GetGreatWorkYieldChange(yield) > 0)
-						{
-							iBuildingTemp += (pEntry->GetGreatWorkYieldChange(yield) *iGW);
-						}
-					}
-				}
-			}
-			
-			if (pEntry->IsFollowerBelief())
-				iBuildingTemp += iIdealEmpireSize * 10;
-		}
-	}
-
-	////////////////////
-	// Diplomacy
-	///////////////////
-	// Minimum influence with city states
-
-	int iDiploTemp = 0;
-	if (!m_pPlayer->GetPlayerTraits()->IsBullyAnnex() && !m_pPlayer->GetPlayerTraits()->IsNoAnnexing())
-	{
-		if (pEntry->GetCityStateMinimumInfluence() != 0)
-		{
-			int iNumCS = 0;
-
-			for (int iPlayerLoop = 0; iPlayerLoop < MAX_CIV_PLAYERS; iPlayerLoop++)
-			{
-				CvPlayer &kLoopPlayer = GET_PLAYER((PlayerTypes)iPlayerLoop);
-				if (kLoopPlayer.isAlive() && kLoopPlayer.isMinorCiv())
-				{
-					iNumCS++;
-					if (kLoopPlayer.GetProximityToPlayer(m_pPlayer->GetID()) >= PLAYER_PROXIMITY_CLOSE)
-					{
-						iNumCS++;
-					}
-				}
-			}
-
-			iDiploTemp += (pEntry->GetCityStateMinimumInfluence() * iNumCS) / 10;
-		}
-	}
-
-	if (pEntry->GetHappinessFromForeignSpies() != 0)
-	{
-		iDiploTemp += pEntry->GetHappinessFromForeignSpies() * max(2, m_pPlayer->GetEspionage()->GetNumSpies() * 25);
-	}
-
-	for (int iI = 0; iI < NUM_YIELD_TYPES; iI++)
-	{
-		if (!bForeignSpreadImmune && !bNoNaturalSpread)
-			iDiploTemp += pEntry->GetYieldPerOtherReligionFollower(iI) * 2;
-
-		if (pEntry->GetYieldFromKnownPantheons(iI) > 0)
-		{
-			int iPantheonValue = (GC.getGame().GetGameReligions()->GetNumPantheonsCreated() * pEntry->GetYieldFromKnownPantheons(iI)) / 100;
-			iDiploTemp += iPantheonValue * (GC.getGame().GetGameReligions()->GetNumPantheonsCreated() / 2);
-		}
-		if (pEntry->GetYieldFromHost(iI) > 0)
-		{
-			CvLeague* pLeague = GC.getGame().GetGameLeagues()->GetActiveLeague();
-			if (pLeague != NULL)
-			{
-				if (pEntry->GetYieldFromHost(iI) != 0)
-				{
-					iDiploTemp += (pEntry->GetYieldFromHost(iI) * pLeague->CalculateStartingVotesForMember(m_pPlayer->GetID())) / 2;
-				}
-				if (pLeague->GetHostMember() == m_pPlayer->GetID())
-				{
-					iDiploTemp *= 10;
-				}
-			}
-			else
-			{
-				if (pEntry->GetYieldFromHost(iI) != 0)
-				{
-					iDiploTemp += (pEntry->GetYieldFromHost(iI) * m_pPlayer->GetNumCSAllies());
-				}
-			}
-		}
-		if (pEntry->GetYieldFromProposal(iI) > 0)
-		{
-			CvLeague* pLeague = GC.getGame().GetGameLeagues()->GetActiveLeague();
-			if (pLeague != NULL)
-			{
-				iDiploTemp += ((pEntry->GetYieldFromProposal(iI) / 2) * pLeague->CalculateStartingVotesForMember(m_pPlayer->GetID())) / 2;
-			}
-			else
-			{
-				iDiploTemp += ((pEntry->GetYieldFromProposal(iI) / 2)  * m_pPlayer->GetNumCSAllies());
-			}
-		}
-	}
-	if (pEntry->GetCSYieldBonus() > 0)
-	{
-		iDiploTemp += (pEntry->GetCSYieldBonus() * m_pPlayer->GetNumCSAllies()) / 2;
-	}
-
-	int iNumImprovementInfos = GC.getNumImprovementInfos();
-	fraction fVoteRatio = 0;
-	for (int jJ = 0; jJ < iNumImprovementInfos; jJ++)
-	{
-		int iPotentialVotes = pEntry->GetImprovementVoteChange((ImprovementTypes)jJ);
-		if (iPotentialVotes > 0)
-		{
-			int iNumImprovements = max(m_pPlayer->getImprovementCount((ImprovementTypes)jJ), 1);
-			fVoteRatio += fraction(iNumImprovements, iPotentialVotes);
-		}
-	}
-	iDiploTemp += (fVoteRatio * 80).Truncate();
 		
-	if (pEntry->GetCityStateInfluenceModifier() > 0)
-	{
-		iDiploTemp += (pEntry->GetCityStateInfluenceModifier() * m_pPlayer->GetNumCSFriends()) / 2;
-	}
-
-	if (pEntry->GetExtraVotes() > 0)
-	{
-		CvLeague* pLeague = GC.getGame().GetGameLeagues()->GetActiveLeague();
-		if (pLeague != NULL)
+		// passive spread is good if we can't build missionaries
+		if (bNoMissionary)
+			iPassiveSpreadTemp *= 2;
+		// if we want to spread with missionaries, discourage this
+		if (bReligionSpreadFocus)
+			iPassiveSpreadTemp /= 3;
+		if (bReligionBuyUnitsFocus || bReligionGPFocus)
 		{
-			iDiploTemp += (pEntry->GetExtraVotes() * pLeague->CalculateStartingVotesForMember(m_pPlayer->GetID()) * 2);
-		}
-		else
-		{
-			iDiploTemp += (pEntry->GetExtraVotes() * m_pPlayer->GetNumCSAllies() * 2);
+			// if we want to use our faith to buy units or GP, encourage this slightly, it saves us missionaries/inquisitors
+			iPassiveSpreadTemp *= 2;
+			iPassiveSpreadTemp /= 3;
 		}
 	}
+	iRtnValue += iPassiveSpreadTemp;
 
-	DomainTypes eDomain;
-	for (int iI = 0; iI < NUM_DOMAIN_TYPES; iI++)
+	int iActiveSpreadTemp = 0;
+	if (!bNoMissionary)
 	{
-		eDomain = (DomainTypes)iI;
-
-		for (int i = 0; i < NUM_YIELD_TYPES; i++)
+		if (pEntry->GetGoldWhenCityAdopts() > 0)
 		{
-			YieldTypes eYield = (YieldTypes)i;
-			if (pEntry->GetTradeRouteYieldChange(eDomain, eYield) != 0)
+			// this is a one-time yield, it doesn't scale well, give it a rather low value
+			iActiveSpreadTemp += iNumNearbyCitiesToSpreadTo * pEntry->GetGoldWhenCityAdopts() * ScoreYieldForReligionTimes100(YIELD_GOLD) / 3000;
+		}
+		if (pEntry->GetSciencePerOtherReligionFollower() > 0)
+		{
+			iActiveSpreadTemp += iNumNearbyCitiesToSpreadTo * iEnemyReligionsNearby * pEntry->GetSciencePerOtherReligionFollower() * ScoreYieldForReligionTimes100(YIELD_SCIENCE) / 500;
+		}
+		if (pEntry->GetHappinessPerXPeacefulForeignFollowers() > 0 && !pDiploAI->IsGoingForWorldConquest())
+		{
+			iActiveSpreadTemp += iNumNearbyCitiesToSpreadTo * iHappinessValue / pEntry->GetHappinessPerXPeacefulForeignFollowers();
+		}
+		for (iI = 0; iI < NUM_YIELD_TYPES; iI++)
+		{
+			if (pEntry->GetYieldChangePerForeignCity(iI) > 0)
 			{
-				if (pPlayerTraits->IsExpansionist())
+				iActiveSpreadTemp += 3 * (iNumNearbyCitiesToSpreadTo - (m_pPlayer->getNumCities() - iNumOurCitiesWithReligion)) * pEntry->GetYieldChangePerForeignCity(iI) * ScoreYieldForReligionTimes100((YieldTypes)iI) / 100;
+			}
+			if (pEntry->GetYieldChangePerXForeignFollowers(iI) > 0)
+			{
+				iActiveSpreadTemp += 30 * (iNumNearbyCitiesToSpreadTo - (m_pPlayer->getNumCities() - iNumOurCitiesWithReligion)) * ScoreYieldForReligionTimes100((YieldTypes)iI) / 100 / pEntry->GetYieldChangePerXForeignFollowers(iI);
+			}
+		}
+		if (pEntry->GetGoldPerXFollowers() > 0)
+		{
+			// score only foreign cities, owned cities have already been scored in ScoreBeliefForCity
+			iRtnValue += 30 * (iNumNearbyCitiesToSpreadTo - (m_pPlayer->getNumCities() - iNumOurCitiesWithReligion)) * ScoreYieldForReligionTimes100(YIELD_GOLD) / 100 / pEntry->GetGoldPerXFollowers();
+		}
+	}
+	iRtnValue += iActiveSpreadTemp;
+
+	//////////////////
+	//Diplo bonuses.
+	///////////////////////
+	int iDiploTemp = 0;
+	if (pEntry->GetCityStateMinimumInfluence() > 0)
+	{
+		// guaranteed friendship with all CS following our religion is good
+		int iInfluenceValue = (pEntry->GetCityStateMinimumInfluence() + m_pPlayer->GetMinorFriendshipAnchorMod() > GD_INT_GET(FRIENDSHIP_THRESHOLD_FRIENDS)) ? 2 : 1;
+		iInfluenceValue *= pDiploAI->IsGoingForDiploVictory() ? 5 : 1;
+		int iMinorScore = 0;
+		for (int iMinorLoop = MAX_MAJOR_CIVS; iMinorLoop < MAX_CIV_PLAYERS; iMinorLoop++)
+		{
+			PlayerTypes eMinor = (PlayerTypes)iMinorLoop;
+			CvPlayer& minorPlayer = GET_PLAYER(eMinor);
+
+			if (!minorPlayer.isAlive())
+				continue;
+			if (!GET_TEAM(m_pPlayer->getTeam()).isHasMet(minorPlayer.getTeam()))
+				continue;
+
+			if (minorPlayer.GetProximityToPlayer(m_pPlayer->GetID()) >= PLAYER_PROXIMITY_CLOSE)
+			{
+				iMinorScore += minorPlayer.GetProximityToPlayer(m_pPlayer->GetID()) == PLAYER_PROXIMITY_NEIGHBORS ? 2 : 1;
+			}
+		}
+		iDiploTemp += pEntry->GetCityStateMinimumInfluence() * iInfluenceValue * iMinorScore;
+	}
+	iRtnValue += iDiploTemp;
+
+
+	//////////////////
+	//Buildings
+	///////////////////////
+	int iBuildingTemp = 0;
+	int iNumCitiesForBuilding = iNumOurCitiesWithReligion * 10 + (m_pPlayer->getNumCities() - iNumOurCitiesWithReligion) * 4;
+	for (int iK = 0; iK < GC.getNumBuildingClassInfos(); iK++)
+	{
+		if (pEntry->IsBuildingClassEnabled(iK))
+		{
+			BuildingTypes eBuilding = (BuildingTypes)m_pPlayer->getCivilizationInfo().getCivilizationBuildings(iK);
+			if (eBuilding != NO_BUILDING)
+			{
+				CvBuildingEntry* pBuildingEntry = GC.getBuildingInfo(eBuilding);
+				// faith cost
+				iBuildingTemp -= pBuildingEntry->GetFaithCost() * ScoreYieldForReligionTimes100(YIELD_FAITH) / 500;
+
+				if (pBuildingEntry->GetHappiness() > 0)
 				{
-					iDiploTemp += pEntry->GetTradeRouteYieldChange(eDomain, eYield) * 4;
+					iBuildingTemp += iNumCitiesForBuilding * pBuildingEntry->GetHappiness() * iHappinessValue;
 				}
-				else
+				if (pBuildingEntry->GetGreatWorkCount() > 0)
 				{
-					iDiploTemp += pEntry->GetTradeRouteYieldChange(eDomain, eYield) * 2;
+					iBuildingTemp += iNumCitiesForBuilding * pBuildingEntry->GetGreatWorkCount() * (pDiploAI->IsGoingForCultureVictory() ? 4 : 0);
 				}
-			}
-		}
-	}
-
-	////////////////////
-	// Other
-	///////////////////
-
-	int iPolicyGainTemp = 0;
-
-	bool bHasPolicyBelief = false;
-
-	CvBeliefXMLEntries* pkBeliefs = GC.GetGameBeliefs();
-
-	for (int iI = 0; iI < pkBeliefs->GetNumBeliefs(); iI++)
-	{
-		if (GC.getGame().GetGameReligions()->IsInSomeReligion((BeliefTypes)iI, m_pPlayer->GetID()))
-		{
-			if (GC.GetGameBeliefs()->GetEntry((BeliefTypes)iI)->GetPolicyReductionWonderXFollowerCities() != 0)
-			{
-				bHasPolicyBelief = true;
-				break;
-			}
-			else if (GC.GetGameBeliefs()->GetEntry((BeliefTypes)iI)->GetIgnorePolicyRequirementsAmount() != 0)
-			{
-				bHasPolicyBelief = true;
-				break;
-			}
-		}
-	}
-	if (pEntry->GetIgnorePolicyRequirementsAmount() != 0 && !bHasPolicyBelief)
-	{
-		iPolicyGainTemp += m_pPlayer->getWonderProductionModifier() + m_pPlayer->GetPlayerTraits()->GetWonderProductionModifier();
-		if (m_pPlayer->getCapitalCity() != NULL)
-		{
-			iPolicyGainTemp += m_pPlayer->getCapitalCity()->getProduction();
-		}
-	}
-
-	if (!bHasPolicyBelief && pEntry->GetPolicyReductionWonderXFollowerCities() != 0)
-	{
-		iPolicyGainTemp += m_pPlayer->getWonderProductionModifier() + m_pPlayer->GetPlayerTraits()->GetWonderProductionModifier();
-		if (m_pPlayer->getCapitalCity() != NULL)
-		{
-			iPolicyGainTemp += m_pPlayer->getCapitalCity()->getProduction();
-		}
-	}
-
-	int iGoldenAgeTemp = 0;
-
-	for (int iI = 0; iI < NUM_YIELD_TYPES; iI++)
-	{
-		if (pEntry->GetYieldBonusGoldenAge(iI) > 0)
-		{
-			iGoldenAgeTemp += pEntry->GetYieldBonusGoldenAge(iI) * 5;
-
-			ReligionTypes eReligion = m_pPlayer->GetReligions()->GetStateReligion();
-			if (eReligion != NO_RELIGION)
-			{
-				const CvReligion* pReligion = GC.getGame().GetGameReligions()->GetReligion(eReligion, m_pPlayer->GetID());
-				if (pReligion)
+				for (iI = 0; iI < NUM_YIELD_TYPES; iI++)
 				{
-					CvCity* pHolyCity = pReligion->GetHolyCity();
-
-					for (int iJ = 0; iJ < GC.getNumGreatPersonInfos(); iJ++)
+					YieldTypes eYield = (YieldTypes)iI;
+					if (pBuildingEntry->GetYieldChange(iI) > 0)
 					{
-						GreatPersonTypes eGP = (GreatPersonTypes)iJ;
-						if (eGP == NO_GREATPERSON)
-							continue;
-
-						if (pReligion->m_Beliefs.GetGoldenAgeGreatPersonRateModifier(eGP, m_pPlayer->GetID(), pHolyCity) > 0)
-						{
-							iGoldenAgeTemp += pReligion->m_Beliefs.GetGoldenAgeGreatPersonRateModifier(eGP, m_pPlayer->GetID(), pHolyCity) * 2;
-						}
+						iBuildingTemp += iNumCitiesForBuilding * pBuildingEntry->GetYieldChange(iI) * ScoreYieldForReligionTimes100(eYield) / 100;
 					}
-					for (uint ui = 0; ui < NUM_YIELD_TYPES; ui++)
+					for (int iJ = 0; iJ < GC.getNumResourceInfos(); iJ++)
 					{
-						YieldTypes yield = (YieldTypes)ui;
-
-						if (yield == NO_YIELD)
-							continue;
-
-						if (pReligion->m_Beliefs.GetYieldBonusGoldenAge(yield, m_pPlayer->GetID(), pHolyCity) > 0)
+						ResourceTypes eResource = (ResourceTypes)iJ;
+						if (pBuildingEntry->GetResourceYieldChange(eResource, eYield) > 0)
 						{
-							iGoldenAgeTemp += pReligion->m_Beliefs.GetYieldBonusGoldenAge(yield, m_pPlayer->GetID(), pHolyCity) * 5;
+							iBuildingTemp += (m_pPlayer->getNumResourceFromTiles(eResource) + m_pPlayer->getNumResourceUnimproved(eResource)) * pBuildingEntry->GetResourceYieldChange(eResource, eYield) * ScoreYieldForReligionTimes100(eYield) / 100;
 						}
 					}
 				}
+
 			}
 		}
 	}
+	iRtnValue += iBuildingTemp;
 
-	//sanity check - we don't want buildings to be the sole reason we get a founder.
-	if (pEntry->IsFounderBelief() && (iWarTemp + iHappinessTemp + iGoldenAgeTemp + iScienceTemp + iGPTemp + iCultureTemp + iPolicyGainTemp + iGoldTemp + iSpreadTemp + iDiploTemp) <= 250)
-		iBuildingTemp /= 100;
+	//////////////////
+	//Misc player bonuses.
+	///////////////////////
 
-	if (pPlayerTraits->IsWarmonger())
+	int iMisc = 0;
+	if (pEntry->GetBorderGrowthRateIncreaseGlobal() > 0)
 	{
-		iWarTemp *= 3;
-		iHappinessTemp *= 2;
-	}
-	if (pPlayerTraits->IsNerd())
-	{
-		iScienceTemp *= 3;
-		iGoldenAgeTemp *= 2;
-	}
-	if (pPlayerTraits->IsTourism())
-	{
-		iCultureTemp *= 3;
-		iGoldenAgeTemp *= 2;
-	}
-	if (pPlayerTraits->IsDiplomat())
-	{
-		iSpreadTemp *= pEntry->IsPantheonBelief() ? 1 : 3;
-		iGoldTemp *= 3;
-	}
-	if (pPlayerTraits->IsReligious())
-	{
-		iSpreadTemp *= pEntry->IsPantheonBelief() ? 2 : 3;
-		iGPTemp *= 2;
-	}
-	if (pPlayerTraits->IsExpansionist())
-	{
-		iSpreadTemp *= pEntry->IsPantheonBelief() ? 2 : 3;
-		iHappinessTemp *= 3;
-		iPolicyGainTemp *= 2;
-	}
-	if (pPlayerTraits->IsSmaller())
-	{
-		iGoldenAgeTemp *= 2;
-		iGPTemp *= 3;
-	}
-
-	//add in the existing modifier values of our other beliefs to influence this one.
-	if (!bReturnConquest && !bReturnCulture && !bReturnDiplo && !bReturnScience)
-	{
-		ReligionTypes eReligion = m_pPlayer->GetReligions()->GetStateReligion();
-		if (eReligion != NO_RELIGION)
+		iRtnValue += (iDefensePriority + iOffensePriority) * pEntry->GetBorderGrowthRateIncreaseGlobal() / 20;
+		for (iI = 0; iI < NUM_YIELD_TYPES; iI++)
 		{
-			const CvReligion* pReligion = GC.getGame().GetGameReligions()->GetReligion(eReligion, m_pPlayer->GetID());
-			if (pReligion)
+			if (pPlayerTraits->GetYieldFromTileEarn((YieldTypes)iI) > 0)
 			{
-				CvReligionBeliefs beliefs = pReligion->m_Beliefs;
-				for (int iI = 0; iI < beliefs.GetNumBeliefs(); iI++)
-				{
-					iWarTemp += ScoreBeliefForPlayer(GC.getBeliefInfo(beliefs.GetBelief(iI)), true) / 5;
-					iCultureTemp += ScoreBeliefForPlayer(GC.getBeliefInfo(beliefs.GetBelief(iI)), false, true) / 5;
-					iScienceTemp += ScoreBeliefForPlayer(GC.getBeliefInfo(beliefs.GetBelief(iI)), false, false, true) / 5;
-					iGoldTemp += ScoreBeliefForPlayer(GC.getBeliefInfo(beliefs.GetBelief(iI)), false, false, false, true) / 5;
-				}
+				iMisc += pEntry->GetBorderGrowthRateIncreaseGlobal() * pPlayerTraits->GetYieldFromTileEarn((YieldTypes)iI) * ScoreYieldForReligionTimes100((YieldTypes)iI) / 500;
 			}
 		}
 	}
 
-	//Take the bonus from above and multiply it by the priority value / 10 (as most are 100+, so we're getting a % interest here).
+	for (iI = 0; iI < NUM_YIELD_TYPES; iI++)
+	{
+		if (pEntry->GetYieldPerBorderGrowth(YieldTypes(iI), false) > 0)
+		{
+			iTemp = pEntry->GetYieldPerBorderGrowth(YieldTypes(iI), false) * ScoreYieldForReligionTimes100((YieldTypes)iI) / 1500;
+			iTemp *= (100 - 3 * pPlayerTraits->GetPlotCultureCostModifier());
+			iTemp /= 100;
+			iMisc += iTemp;
+		}
+		if (pEntry->GetYieldPerBorderGrowth(YieldTypes(iI), true) > 0) // Era Scaling
+		{
+			iTemp = pEntry->GetYieldPerBorderGrowth(YieldTypes(iI), true) * ScoreYieldForReligionTimes100((YieldTypes)iI) / 750;
+			iTemp *= (100 - 3 * pPlayerTraits->GetPlotCultureCostModifier());
+			iTemp /= 100;
+			iMisc += iTemp;
+		}
+		if (pEntry->GetYieldFromEraUnlock(iI) > 0)
+		{
+			iTemp = min(pEntry->GetCityScalerLimiter(), iNumCitiesWithReligionTotal + iNumNearbyCitiesToSpreadTo / 3) * pEntry->GetYieldFromEraUnlock(iI) * max(1, (int)m_pPlayer->GetCurrentEra()) * ScoreYieldForReligionTimes100((YieldTypes)iI) / 5000;
+		}
+	}
 
-	iWarTemp *= (100 + (iConquestInterest / 10));
-	iWarTemp /= 100;
+	if (pEntry->GetPlotCultureCostModifier() < 0)
+	{
+		iMisc += 5 * (-pEntry->GetPlotCultureCostModifier()) * (iOffensePriority + iDefensePriority) / 10;
+	}
 
-	iHappinessTemp *= (100 + (iConquestInterest / 10));
-	iHappinessTemp /= 100;
+	if (!bIsWarmonger)
+	{
+		for (iI = 0; iI < NUM_YIELD_TYPES; iI++)
+		{
+			if (pEntry->GetYieldPerActiveTR(YieldTypes(iI)) > 0)
+			{
+				// this bonus is good also if we don't have any neighbors, as internal TRs give bonuses too (and even in two cities at once). it's only bad if we're surrounded by warmongers as they might plunder our TRs
+				iTemp = max(0, 6 - iNeighborWarmongerThreat) * pEntry->GetYieldPerActiveTR(YieldTypes(iI)) * ScoreYieldForReligionTimes100(YieldTypes(iI)) / 100;
+				if (bIsTall || pPlayerTraits->IsDiplomat())
+				{
+					iTemp *= 3;
+					iTemp /= 2;
+				}
+				iTemp *= (100 + 2 * pPlayerTraits->GetNumTradeRoutesModifier());
+				iTemp /= 100;				
 
-	iGoldenAgeTemp *= (100 + (iConquestInterest / 10));
-	iGoldenAgeTemp /= 100;
+				iMisc += iTemp;
+			}
+		}
+	}
 
-	if (bReturnConquest)
-		return(iWarTemp + iHappinessTemp + iGoldenAgeTemp + iBuildingTemp) / 2;
+	for (iI = 0; iI < NUM_YIELD_TYPES; iI++)
+	{
+		if (pEntry->GetGreatWorkYieldChange(iI) > 0)
+		{
+			iMisc += (10 * m_pPlayer->GetCulture()->GetNumGreatWorks() + (bIsTall ? 3 : 1)) * pEntry->GetGreatWorkYieldChange(iI) * ScoreYieldForReligionTimes100((YieldTypes)iI) / 100;
+		}
+	}
+	iRtnValue += iMisc;
 
-	iCultureTemp *= (100 + (iCultureInterest / 10));
-	iCultureTemp /= 100;
-
-	iGPTemp *= (100 + (iCultureInterest / 10));
-	iGPTemp /= 100;
-
-	iPolicyGainTemp *= (100 + (iCultureInterest / 10));
-	iPolicyGainTemp /= 100;
-
-	iGoldenAgeTemp *= (100 + (iCultureInterest / 10));
-	iGoldenAgeTemp /= 100;
-
-	if (bReturnCulture)
-		return(iCultureTemp + iGPTemp + iPolicyGainTemp + iGoldenAgeTemp + iBuildingTemp) / 3;
-
-	iGoldTemp *= (100 + (iDiploInterest / 10));
-	iGoldTemp /= 100;
-
-	iDiploTemp *= (100 + (iDiploInterest / 10));
-	iDiploTemp /= 100;
-
-	iSpreadTemp *= (100 + (iDiploInterest / 10));
-	iSpreadTemp /= 100;
-
-	if (bReturnDiplo)
-		return(iGoldTemp + iDiploTemp + iSpreadTemp + iBuildingTemp) / 4;
-
-	iScienceTemp *= (100 + (iScienceInterest / 10));
-	iScienceTemp /= 100;
-
-	iBuildingTemp *= (100 + (iScienceInterest / 10));
-	iBuildingTemp /= 100;
-
-	iGoldenAgeTemp *= (100 + (iScienceInterest / 10));
-	iGoldenAgeTemp /= 100;
-
-	if (bReturnScience)
-		return(iGoldTemp + iScienceTemp + iBuildingTemp + iGPTemp + iGoldenAgeTemp) / 2;
-
-	iRtnValue = (iWarTemp + iHappinessTemp + iGoldenAgeTemp + iScienceTemp + iGPTemp + iCultureTemp + iPolicyGainTemp + iGoldTemp + iSpreadTemp +  iBuildingTemp + iDiploTemp);
-
-	if (iMissionary > 0 && bNoMissionary)
-		iRtnValue /= 100;
 
 	if (GC.getLogging() && GC.getAILogging())
 	{
@@ -10286,270 +9635,21 @@ int CvReligionAI::ScoreBeliefForPlayer(CvBeliefEntry* pEntry, bool bReturnConque
 
 		// Open the log file
 		FILogFile* pLog = NULL;
-		pLog = LOGFILEMGR.GetLog("PlayerBeliefReligionLog.csv", FILogFile::kDontTimeStamp);
+		pLog = LOGFILEMGR.GetLog("TotalBeliefScoringReligionLog.csv", FILogFile::kDontTimeStamp);
 
 		// Get the leading info for this line
 		strBaseString.Format("%03d, %d, ", GC.getGame().getElapsedGameTurns(), GC.getGame().getGameTurnYear());
 		strBaseString += playerName + ", ";
 
 		strDesc = GetLocalizedText(pEntry->getShortDescription());
-		strTemp.Format("Belief, %s, War: %d, Happiness: %d, Culture: %d, Science: %d, Gold: %d, Spread: %d, GP: %d, Diplo: %d, Building: %d, Policies: %d, Golden Ages: %d", strDesc.GetCString(), iWarTemp, iHappinessTemp, iCultureTemp, iScienceTemp, iGoldTemp, iSpreadTemp, iGPTemp, iDiploTemp, iBuildingTemp, iPolicyGainTemp, iGoldenAgeTemp);
+		strTemp.Format("Player Score for Belief %s: %d. War: %d, Defense: %d, Happiness: %d, Passive Spread: %d, Active Spread: %d, Buildings: %d, Diplo: %d, Misc: %d", strDesc.GetCString(), iRtnValue, iWarTemp, iDefenseTemp, iHappinessTemp, iPassiveSpreadTemp, iActiveSpreadTemp, iBuildingTemp, iDiploTemp, iMisc);
 		strOutBuf = strBaseString + strTemp;
-		strTemp.Format(" --- Total Value: %d. Conquest Interest: %d, Culture Interest: %d, SS Interest: %d, WC Interest: %d", iRtnValue, iConquestInterest, iCultureInterest, iScienceInterest, iDiploInterest);
-		strOutBuf += strTemp;
 		pLog->Msg(strOutBuf);
 	}
 
 	return iRtnValue;
 }
 
-// AI's evaluation of a pantheon belief on player level
-int CvReligionAI::ScorePantheonBeliefForPlayer(CvBeliefEntry* pEntry) const
-{
-	int iRtnValue = 0;
-	int iTemp = 0;
-	int iI = 0;
-	// which policy branches have we adopted? if no policy branch adopted, check player traits
-	CvPlayerTraits* pPlayerTraits = m_pPlayer->GetPlayerTraits();
-	bool bIsTall = false;
-	bool bIsWarmonger = false;
-	bool bIsExpansion = false;
-	PolicyBranchTypes eTradition = (PolicyBranchTypes)GC.getInfoTypeForString("POLICY_BRANCH_TRADITION", true);
-	PolicyBranchTypes eProgress = (PolicyBranchTypes)GC.getInfoTypeForString("POLICY_BRANCH_LIBERTY", true);
-	PolicyBranchTypes eAuthority = (PolicyBranchTypes)GC.getInfoTypeForString("POLICY_BRANCH_HONOR", true);
-	CvPlayerPolicies* pPlayerPolicies = m_pPlayer->GetPlayerPolicies();
-	if (pPlayerPolicies->IsPolicyBranchUnlocked(eTradition))
-		bIsTall = true;
-	else if (pPlayerPolicies->IsPolicyBranchUnlocked(eAuthority))
-		bIsWarmonger = true;
-	else if (pPlayerPolicies->IsPolicyBranchUnlocked(eProgress))
-		bIsExpansion = true;
-	else
-	{
-		// no early-game policy unlocked, or unlocked fealty (CP only): determine exploration range based on player traits
-		if (pPlayerTraits->IsExpansionist())
-		{
-			bIsExpansion = true;
-		}
-		else if (pPlayerTraits->IsSmaller())
-		{
-			bIsTall = true;
-		}
-		else if (pPlayerTraits->IsWarmonger())
-		{
-			bIsWarmonger = true;
-		}
-	}
-
-	CvFlavorManager* pFlavorManager = m_pPlayer->GetFlavorManager();
-	int iFlavorOffense = pFlavorManager->GetPersonalityIndividualFlavor((FlavorTypes)GC.getInfoTypeForString("FLAVOR_OFFENSE"));
-	int iFlavorCityDefense = pFlavorManager->GetPersonalityIndividualFlavor((FlavorTypes)GC.getInfoTypeForString("FLAVOR_CITY_DEFENSE"));
-	int iFlavorDefense = pFlavorManager->GetPersonalityIndividualFlavor((FlavorTypes)GC.getInfoTypeForString("FLAVOR_DEFENSE"));
-	int iFlavorWonder = pFlavorManager->GetPersonalityIndividualFlavor((FlavorTypes)GC.getInfoTypeForString("FLAVOR_WONDER"));
-
-	int iNumNeighbors = 0;
-	int iNumWarmongerNeighbors = 0;
-	for (int iPlayerLoop = 0; iPlayerLoop < MAX_MAJOR_CIVS; iPlayerLoop++)
-	{
-		CvPlayer& kLoopPlayer = GET_PLAYER((PlayerTypes)iPlayerLoop);
-		if (kLoopPlayer.isAlive() && iPlayerLoop != m_pPlayer->GetID())
-		{
-			if (kLoopPlayer.GetProximityToPlayer(m_pPlayer->GetID()) >= PLAYER_PROXIMITY_CLOSE)
-			{
-				iNumNeighbors++;
-				CvPlayerTraits* pLoopPlayerTraits = kLoopPlayer.GetPlayerTraits();
-				if (pLoopPlayerTraits->IsWarmonger())
-				{
-					iNumWarmongerNeighbors++;
-				}
-			}
-		}
-	}
-
-	if (bIsWarmonger && iNumNeighbors > 0)
-	{
-		iTemp = 0;
-		if (pEntry->GetFaithFromKills() > 0)
-		{
-			iTemp += iFlavorOffense * pEntry->GetFaithFromKills() * ScoreYieldForReligionTimes100(YIELD_FAITH) * min(3, iNumNeighbors) / 1000;
-		}
-		for (iI = 0; iI < NUM_YIELD_TYPES; iI++)
-		{
-			if (pEntry->GetYieldFromBarbarianKills((YieldTypes)iI))
-			{
-				iTemp += iFlavorOffense * pEntry->GetYieldFromBarbarianKills((YieldTypes)iI) * ScoreYieldForReligionTimes100((YieldTypes)iI) / 1000;
-			}
-			if (pEntry->GetYieldFromKills((YieldTypes)iI))
-			{
-				iTemp += iFlavorOffense * pEntry->GetYieldFromKills((YieldTypes)iI) * ScoreYieldForReligionTimes100((YieldTypes)iI) * min(3, iNumNeighbors) / 1000;
-			}
-			if (pEntry->GetYieldPerHeal((YieldTypes)iI))
-			{
-				iTemp += iFlavorOffense * (pEntry->GetYieldPerHeal((YieldTypes)iI) / 5) * ScoreYieldForReligionTimes100((YieldTypes)iI) * min(3, iNumNeighbors) / 1000;
-			}
-		}
-		if (pEntry->GetUnitProductionModifier() > 0)
-		{
-			iTemp += 10 * pEntry->GetUnitProductionModifier();
-		}
-		if (pEntry->GetMaxDistance() != 0)
-		{
-			iTemp /= 2;
-		}
-		if (pEntry->RequiresPeace())
-		{
-			iTemp -= 1000;
-		}
-		iRtnValue += iTemp;
-	}
-
-	if (!bIsWarmonger && iNumWarmongerNeighbors > 0)
-	{
-		if (pEntry->GetFriendlyHealChange() > 0)
-		{
-			iRtnValue += (iFlavorCityDefense + iFlavorDefense) * pEntry->GetFriendlyHealChange() * iNumWarmongerNeighbors * (bIsTall ? 2 : 1);
-		}
-		if (pEntry->GetCityRangeStrikeModifier() > 0)
-		{
-			iRtnValue += (iFlavorCityDefense + iFlavorDefense) * pEntry->GetCityRangeStrikeModifier() * iNumWarmongerNeighbors * (bIsTall ? 2 : 1);
-		}
-		if (pEntry->GetUnitProductionModifier() > 0)
-		{
-			iRtnValue += 5 * pEntry->GetUnitProductionModifier();
-		}
-		if (pEntry->RequiresPeace())
-		{
-			iRtnValue -= 200 * iNumWarmongerNeighbors;
-		}
-		if (pEntry->GetYieldPerHeal((YieldTypes)iI))
-		{
-			iTemp += iFlavorDefense * (pEntry->GetYieldPerHeal((YieldTypes)iI) / 5) * ScoreYieldForReligionTimes100((YieldTypes)iI) * iNumWarmongerNeighbors / 1000;
-		}
-	}
-
-	if (pEntry->GetWonderProductionModifier() > 0)
-	{
-		iTemp = iFlavorWonder * pEntry->GetWonderProductionModifier() * (bIsTall ? 2 : 1);
-		iTemp *= (100 + 2 * pPlayerTraits->GetWonderProductionModifier() + pPlayerTraits->GetWonderProductionModGA());
-		iTemp /= 100;
-		if (pEntry->GetObsoleteEra() > 0)
-		{
-			if (pEntry->GetObsoleteEra() > GC.getGame().getCurrentEra())
-			{
-				iTemp *= pEntry->GetObsoleteEra();
-				iTemp /= 5;
-			}
-			else
-			{
-				iTemp = 0;
-			}
-		}
-		iRtnValue += iTemp;
-	}
-
-	for (iI = 0; iI < NUM_YIELD_TYPES; iI++)
-	{
-		if (pEntry->GetYieldChangeWorldWonder(iI) > 0)
-		{
-			iTemp = iFlavorWonder * pEntry->GetYieldChangeWorldWonder(iI) * (bIsTall ? 2 : 1);
-			iTemp *= (100 + 3 * pPlayerTraits->GetWonderProductionModifier() + pPlayerTraits->GetWonderProductionModGA());
-			iTemp /= 100;
-			// add bonus for existing wonders
-			iTemp += 10 * m_pPlayer->GetNumWonders();
-			iRtnValue += iTemp * ScoreYieldForReligionTimes100((YieldTypes)iI) / 100;
-		}
-	}
-
-	if (pEntry->GetCityGrowthModifier() > 0)
-	{
-		iRtnValue += 2 * pEntry->GetCityGrowthModifier() * (bIsTall ? 2 : 1);
-	}
-
-	if (pEntry->GetBorderGrowthRateIncreaseGlobal() > 0)
-	{
-		iRtnValue += max(pEntry->GetBorderGrowthRateIncreaseGlobal(), (iFlavorDefense - iFlavorOffense) * 7);
-		for (iI = 0; iI < NUM_YIELD_TYPES; iI++)
-		{
-			if (pPlayerTraits->GetYieldFromTileEarn((YieldTypes)iI) > 0)
-			{
-				iRtnValue += pEntry->GetBorderGrowthRateIncreaseGlobal() * pPlayerTraits->GetYieldFromTileEarn((YieldTypes)iI) * ScoreYieldForReligionTimes100((YieldTypes)iI) / 500;
-			}
-		}
-	}
-
-	for (iI = 0; iI < NUM_YIELD_TYPES; iI++)
-	{
-		if (pEntry->GetYieldPerBorderGrowth(YieldTypes(iI), false) > 0)
-		{
-			iTemp = pEntry->GetYieldPerBorderGrowth(YieldTypes(iI), false) * ScoreYieldForReligionTimes100((YieldTypes)iI) / 100;
-			iTemp *= (100 - 3 * pPlayerTraits->GetPlotCultureCostModifier());
-			iTemp /= 100;
-			iRtnValue += iTemp;
-		}
-		if (pEntry->GetYieldPerBorderGrowth(YieldTypes(iI), true) > 0) // Era Scaling
-		{
-			iTemp = pEntry->GetYieldPerBorderGrowth(YieldTypes(iI), true) * ScoreYieldForReligionTimes100((YieldTypes)iI) / 50;
-			iTemp *= (100 - 3 * pPlayerTraits->GetPlotCultureCostModifier());
-			iTemp /= 100;
-			iRtnValue += iTemp;
-		}
-	}
-
-	if (pEntry->GetPlotCultureCostModifier() < 0)
-	{
-		iRtnValue += 5 * max(-pEntry->GetPlotCultureCostModifier(), (iFlavorDefense - iFlavorOffense) * 7);
-	}
-
-	if (!bIsWarmonger)
-	{
-		for (iI = 0; iI < NUM_YIELD_TYPES; iI++)
-		{
-			if (pEntry->GetYieldPerActiveTR(YieldTypes(iI)) > 0)
-			{
-				// this bonus is good also if we don't have any neighbors, as internal TRs give bonuses too (and even in two cities at once). it's only bad if we're surrounded by warmongers as they might plunder our TRs
-				iTemp = 2 * max(0, 2 - iNumWarmongerNeighbors) * pEntry->GetYieldPerActiveTR(YieldTypes(iI)) * ScoreYieldForReligionTimes100(YieldTypes(iI)) / 100;
-				if (bIsTall || pPlayerTraits->IsDiplomat())
-				{
-					iTemp *= 3;
-					iTemp /= 2;
-				}
-				iTemp *= (100 + 3 * pPlayerTraits->GetNumTradeRoutesModifier());
-				iTemp /= 100;
-
-				iRtnValue += iTemp;
-			}
-		}
-	}
-
-	for (iI = 0; iI < NUM_YIELD_TYPES; iI++)
-	{
-		if (pEntry->GetGreatWorkYieldChange(iI) > 0)
-		{
-			iTemp = bIsTall ? 150 : 50;
-			iRtnValue += iTemp;
-		}
-	}
-	
-	for (iI = 0; iI < NUM_YIELD_TYPES; iI++)
-	{
-		int iNumFutureLuxEstimate = 2 + 2 * m_pPlayer->GetPlayerTraits()->GetUniqueLuxuryQuantity();
-		if (pPlayerTraits->IsDiplomat())
-			iNumFutureLuxEstimate++;
-		if(pPlayerTraits->IsImportsCountTowardsMonopolies())
-			iNumFutureLuxEstimate++;
-		if (bIsExpansion)
-			iNumFutureLuxEstimate++;
-		if (bIsWarmonger)
-			iNumFutureLuxEstimate--;
-
-		if (pEntry->GetYieldPerLux(iI) > 0)
-		{
-			iRtnValue += iNumFutureLuxEstimate * 3 * pEntry->GetYieldPerLux(iI) * ScoreYieldForReligionTimes100((YieldTypes)iI) / 100;
-		}
-	}
-
-	return iRtnValue;
-}
 /// AI's evaluation of this city as a target for a missionary
 int CvReligionAI::ScoreCityForMissionary(CvCity* pCity, CvUnit* pUnit, ReligionTypes eSpreadReligion) const
 {

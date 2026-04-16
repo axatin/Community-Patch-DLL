@@ -4646,7 +4646,7 @@ bool CvPlot::isVisible(TeamTypes eTeam) const
 //	--------------------------------------------------------------------------------
 bool CvPlot::isActiveVisible() const
 {
-	if (GET_PLAYER(GC.getGame().getActivePlayer()).isObserver() && CvPreGame::quickCombat() && CvPreGame::quickMovement())
+	if (GET_PLAYER(GC.getGame().getActivePlayer()).isObserver())
 		//this is relevant for animations etc, do not show them in observer mode, makes everything faster
 		return false;
 
@@ -10257,7 +10257,7 @@ int CvPlot::calculateReligionNatureYield(YieldTypes eYield, PlayerTypes ePlayer,
 
 	if (ePlayer == NO_PLAYER)
 		return 0;
-
+	
 	int iYield = 0;
 
 	//Change for improvement/resource
@@ -10268,78 +10268,10 @@ int CvPlot::calculateReligionNatureYield(YieldTypes eYield, PlayerTypes ePlayer,
 	bool bRequiresNoFeature = pMajorityReligion->m_Beliefs.RequiresNoFeature(ePlayer);
 	bool bRequiresEmptyTile = (bRequiresResource && bRequiresNoFeature);
 	bool bRequiresBoth = (bRequiresImprovement && bRequiresResource);
-	int iValue = pMajorityReligion->m_Beliefs.GetTerrainYieldChange(getTerrainType(), eYield, ePlayer, pOwningCity);
-	if (bRequiresImprovement || bRequiresResource || bRequiresNoImprovement)
+	if (eFeature == NO_FEATURE || !GC.getFeatureInfo(eFeature)->isYieldNotAdditive())
 	{
-		if (bRequiresBoth)
-		{
-			if (eImprovement != NO_IMPROVEMENT && eResource != NO_RESOURCE)
-			{
-				if (GC.getImprovementInfo(eImprovement)->IsConnectsResource(eResource))
-				{
-					iReligionChange += iValue;
-				}
-			}
-		}
-		else if (bRequiresImprovement)
-		{
-			if (eImprovement != NO_IMPROVEMENT)
-			{
-				iReligionChange += iValue;
-			}
-		}
-		else if (bRequiresResource)
-		{
-			if (eResource != NO_RESOURCE)
-			{
-				iReligionChange += iValue;
-			}
-		}
-		else if (bRequiresEmptyTile)
-		{
-			if (eImprovement == NO_IMPROVEMENT && eFeature == NO_FEATURE)
-			{
-				iReligionChange += iValue;
-			}
-		}
-		else if (bRequiresNoImprovement)
-		{
-			if (eImprovement == NO_IMPROVEMENT)
-			{
-				iReligionChange += iValue;
-			}
-		}
-		else if (bRequiresNoFeature)
-		{
-			if (eFeature == NO_FEATURE)
-			{
-				iReligionChange += iValue;
-			}
-		}
-		if (iReligionChange > iValue)
-		{
-			iReligionChange = iValue;
-		}
-	}
-	else
-	{
-		iReligionChange = iValue;
-	}
-
-	iYield += iReligionChange;
-
-	if (pSecondaryPantheon)
-	{
-		//Change for improvement/resource
-		iReligionChange = 0;
-		bool bRequiresImprovement = pSecondaryPantheon->RequiresImprovement();
-		bool bRequiresNoImprovement = pSecondaryPantheon->RequiresNoImprovement();
-		bool bRequiresResource = pSecondaryPantheon->RequiresResource();
-		bool bRequiresNoFeature = pSecondaryPantheon->RequiresNoFeature();
-		bool bRequiresEmptyTile = (bRequiresResource && bRequiresNoFeature);
-		bool bRequiresBoth = (bRequiresImprovement && bRequiresResource);
-		int iValue = pSecondaryPantheon->GetTerrainYieldChange(getTerrainType(), eYield);
-		if (bRequiresImprovement || bRequiresResource || bRequiresNoImprovement)
+		int iValue = pMajorityReligion->m_Beliefs.GetTerrainYieldChange(getTerrainType(), eYield, ePlayer, pOwningCity);
+		if (iValue > 0 && (bRequiresImprovement || bRequiresResource || bRequiresNoImprovement))
 		{
 			if (bRequiresBoth)
 			{
@@ -10355,10 +10287,7 @@ int CvPlot::calculateReligionNatureYield(YieldTypes eYield, PlayerTypes ePlayer,
 			{
 				if (eImprovement != NO_IMPROVEMENT)
 				{
-					if (GC.getImprovementInfo(eImprovement)->IsConnectsResource(eResource))
-					{
-						iReligionChange += iValue;
-					}
+					iReligionChange += iValue;
 				}
 			}
 			else if (bRequiresResource)
@@ -10370,7 +10299,7 @@ int CvPlot::calculateReligionNatureYield(YieldTypes eYield, PlayerTypes ePlayer,
 			}
 			else if (bRequiresEmptyTile)
 			{
-				if (eImprovement == NO_IMPROVEMENT && getFeatureType() == NO_FEATURE)
+				if (eImprovement == NO_IMPROVEMENT && eFeature == NO_FEATURE)
 				{
 					iReligionChange += iValue;
 				}
@@ -10400,6 +10329,80 @@ int CvPlot::calculateReligionNatureYield(YieldTypes eYield, PlayerTypes ePlayer,
 		}
 
 		iYield += iReligionChange;
+
+		if (pSecondaryPantheon)
+		{
+			//Change for improvement/resource
+			iReligionChange = 0;
+			bool bRequiresImprovement = pSecondaryPantheon->RequiresImprovement();
+			bool bRequiresNoImprovement = pSecondaryPantheon->RequiresNoImprovement();
+			bool bRequiresResource = pSecondaryPantheon->RequiresResource();
+			bool bRequiresNoFeature = pSecondaryPantheon->RequiresNoFeature();
+			bool bRequiresEmptyTile = (bRequiresResource && bRequiresNoFeature);
+			bool bRequiresBoth = (bRequiresImprovement && bRequiresResource);
+			int iValue = pSecondaryPantheon->GetTerrainYieldChange(getTerrainType(), eYield);
+			if (iValue > 0 && (bRequiresImprovement || bRequiresResource || bRequiresNoImprovement))
+			{
+				if (bRequiresBoth)
+				{
+					if (eImprovement != NO_IMPROVEMENT && eResource != NO_RESOURCE)
+					{
+						if (GC.getImprovementInfo(eImprovement)->IsConnectsResource(eResource))
+						{
+							iReligionChange += iValue;
+						}
+					}
+				}
+				else if (bRequiresImprovement)
+				{
+					if (eImprovement != NO_IMPROVEMENT)
+					{
+						if (GC.getImprovementInfo(eImprovement)->IsConnectsResource(eResource))
+						{
+							iReligionChange += iValue;
+						}
+					}
+				}
+				else if (bRequiresResource)
+				{
+					if (eResource != NO_RESOURCE)
+					{
+						iReligionChange += iValue;
+					}
+				}
+				else if (bRequiresEmptyTile)
+				{
+					if (eImprovement == NO_IMPROVEMENT && getFeatureType() == NO_FEATURE)
+					{
+						iReligionChange += iValue;
+					}
+				}
+				else if (bRequiresNoImprovement)
+				{
+					if (eImprovement == NO_IMPROVEMENT)
+					{
+						iReligionChange += iValue;
+					}
+				}
+				else if (bRequiresNoFeature)
+				{
+					if (eFeature == NO_FEATURE)
+					{
+						iReligionChange += iValue;
+					}
+				}
+				if (iReligionChange > iValue)
+				{
+					iReligionChange = iValue;
+				}
+			}
+			else
+			{
+				iReligionChange = iValue;
+			}
+
+			iYield += iReligionChange;
+		}
 	}
 
 	iYield += pMajorityReligion->m_Beliefs.GetPlotYieldChange(getPlotType(), eYield, ePlayer, pOwningCity);

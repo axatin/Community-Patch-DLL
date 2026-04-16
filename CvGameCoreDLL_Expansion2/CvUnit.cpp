@@ -10874,6 +10874,8 @@ bool CvUnit::DoFoundReligion()
 				finishMoves();
 			}
 
+			kOwner.GetReligions()->SetFoundingReligion(true);
+
 			if(kOwner.isHuman(ISHUMAN_AI_RELIGION_CHOICE))
 			{
 				ASSERT(pkCity != NULL, "No City??");
@@ -10885,7 +10887,6 @@ bool CvUnit::DoFoundReligion()
 					CvString strSummary = GetLocalizedText("TXT_KEY_NOTIFICATION_SUMMARY_FOUND_RELIGION");
 					pNotifications->Add(NOTIFICATION_FOUND_RELIGION, strBuffer, strSummary, pkPlot->getX(), pkPlot->getY(), -1, pkCity->GetID());
 				}
-				kOwner.GetReligions()->SetFoundingReligion(true);
 
 				if (!bIndiaException)
 				{
@@ -10895,6 +10896,16 @@ bool CvUnit::DoFoundReligion()
 			}
 			else
 			{
+				CvNotifications* pNotifications = kOwner.GetNotifications();
+				if (pNotifications)
+				{
+					CvString strBuffer = GetLocalizedText("TXT_KEY_NOTIFICATION_FOUND_RELIGION");
+					CvString strSummary = GetLocalizedText("TXT_KEY_NOTIFICATION_SUMMARY_FOUND_RELIGION");
+					pNotifications->Add(NOTIFICATION_FOUND_RELIGION, strBuffer, strSummary, pkPlot->getX(), pkPlot->getY(), -1, pkCity->GetID());
+				}
+				gDLL->AutoSave(false);
+
+
 				ReligionTypes eReligion = pReligions->GetReligionToFound(getOwner());
 				if(eReligion != NO_RELIGION)
 				{
@@ -10912,7 +10923,7 @@ bool CvUnit::DoFoundReligion()
 					eBeliefs[iIndex] = kOwner.GetReligionAI()->ChooseFounderBelief(kOwner.GetID(), eReligion);
 					iIndex++;
 
-					eBeliefs[iIndex] = kOwner.GetReligionAI()->ChooseFollowerBelief(kOwner.GetID(), eReligion);
+					eBeliefs[iIndex] = kOwner.GetReligionAI()->ChooseFollowerBelief(kOwner.GetID(), eReligion, eBeliefs[iIndex-1]);
 					iIndex++;
 
 					if(kOwner.GetPlayerTraits()->IsBonusReligiousBelief())
@@ -11052,12 +11063,23 @@ bool CvUnit::DoEnhanceReligion()
 			}
 			else
 			{
+				CvNotifications* pNotifications = kOwner.GetNotifications();
+				if (pNotifications)
+				{
+					CvString strBuffer = GetLocalizedText("TXT_KEY_NOTIFICATION_ENHANCE_RELIGION");
+					CvString strSummary = GetLocalizedText("TXT_KEY_NOTIFICATION_SUMMARY_ENHANCE_RELIGION");
+					pNotifications->Add(NOTIFICATION_ENHANCE_RELIGION, strBuffer, strSummary, pkPlot->getX(), pkPlot->getY(), -1, pkCity->GetID());
+				}
+				gDLL->AutoSave(false);
+				// switch to AI player again
+
+
 				ReligionTypes eReligion = kOwner.GetReligions()->GetOwnedReligion();
 				if (eReligion != NO_RELIGION)
 				{
 					// Pick a belief for this religion
-					BeliefTypes eBelief1 = kOwner.GetReligionAI()->ChooseFollowerBelief(kOwner.GetID(), eReligion); // temporary
 					BeliefTypes eBelief2 = kOwner.GetReligionAI()->ChooseEnhancerBelief(kOwner.GetID(), eReligion); // temporary
+					BeliefTypes eBelief1 = kOwner.GetReligionAI()->ChooseFollowerBelief(kOwner.GetID(), eReligion, eBelief2); // temporary
 
 					pReligions->EnhanceReligion(getOwner(), eReligion, eBelief1, eBelief2);
 

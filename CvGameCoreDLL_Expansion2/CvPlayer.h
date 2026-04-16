@@ -629,9 +629,12 @@ public:
 	int GetUnhappinessGrowthPenalty() const;
 	int GetUnhappinessSettlerCostPenalty() const;
 	int GetUnhappinessCombatStrengthPenalty() const;
+	bool IsEmpireVeryHappy() const;
 	bool IsEmpireUnhappy() const;
 	bool IsEmpireVeryUnhappy() const;
 	bool IsEmpireSuperUnhappy() const;
+
+	int GetHappinessValue() const;
 
 	void DoUpdateUprisings();
 	int GetUprisingCounter() const;
@@ -2038,6 +2041,7 @@ public:
 	void changeNumResourceUsed(ResourceTypes eIndex, int iChange);
 	int getNumResourceFromBuildings(ResourceTypes eIndex) const;
 	int getNumResourceTotal(ResourceTypes eIndex, bool bIncludeImport = true) const;
+	int getNumResourceFromTiles(ResourceTypes iIndex) const;
 	int getNumResourcesFromOther(ResourceTypes eIndex) const;
 	void changeNumResourceTotal(ResourceTypes eIndex, int iChange, bool bFromBuilding = false, bool bCheckForMonopoly = true, bool bFromEvent = false);
 

@@ -13081,22 +13081,6 @@ void CvPlayer::receiveGoody(CvPlot* pPlot, GoodyTypes eGoody, CvUnit* pUnit)
 		{
 			GC.GetEngineUserInterface()->AddPlotMessage(0, pPlot->GetPlotIndex(), GetID(), true, /*10*/ GD_INT_GET(EVENT_MESSAGE_TIME), strBuffer);
 		}
-		// in observer mode without quick movement, show a notification
-		else if (GET_PLAYER(GC.getGame().getActivePlayer()).isObserver() && !CvPreGame::quickMovement())
-		{
-			if (GC.getGame().getObserverUIOverridePlayer() == NO_PLAYER || GC.getGame().getObserverUIOverridePlayer() == GetID())
-			{
-				CvNotifications* pNotify = GET_PLAYER(GC.getGame().getActivePlayer()).GetNotifications();
-				if (pNotify)
-				{
-					Localization::String strNotification = Localization::Lookup("TXT_KEY_MISC_OTHER_RECEIVED_GOODY");
-					strNotification << getCivilizationShortDescriptionKey();
-					strNotification << strBuffer.c_str();
-					Localization::String strSummary = Localization::Lookup("TXT_KEY_MISC_OTHER_RECEIVED_GOODY_S");
-					pNotify->Add(NOTIFICATION_GOODY, strNotification.toUTF8(), strSummary.toUTF8(), -1, -1, -1);
-				}
-			}
-		}
 	}
 
 	// If it's the active player then show the popup
@@ -13796,6 +13780,7 @@ void CvPlayer::foundCity(int iX, int iY, ReligionTypes eReligion, bool bForce, C
 		SetFaithTimes100(iFaith * 100);
 		if (GC.getGame().GetGameReligions()->CanCreatePantheon(GetID(), true) == 0)
 		{
+
 			// Create the pantheon
 			if (isHuman(ISHUMAN_AI_RELIGION_CHOICE))
 			{
@@ -20547,6 +20532,17 @@ int CvPlayer::GetUnhappinessCombatStrengthPenalty() const
 	return max(iPenalty, /*-40*/ GD_INT_GET(VERY_UNHAPPY_MAX_COMBAT_PENALTY));
 }
 
+/// Not an official definition, only used for internal AI evaluations
+bool CvPlayer::IsEmpireVeryHappy() const
+{
+	if (MOD_BALANCE_VP)
+	{
+		return GetExcessHappiness() >= 75 && GetHappinessFromCitizenNeeds() - GetUnhappinessFromCitizenNeeds() >= 10;
+	}
+
+	return GetExcessHappiness() >= 10;
+}
+
 /// Has the player passed the Happiness limit?
 bool CvPlayer::IsEmpireUnhappy() const
 {
@@ -20578,6 +20574,23 @@ bool CvPlayer::IsEmpireSuperUnhappy() const
 	}
 
 	return GetExcessHappiness() <= /*-20*/ GD_INT_GET(SUPER_UNHAPPY_THRESHOLD);
+}
+
+// value of one additional happiness, on a scale from 1 to 10
+int CvPlayer::GetHappinessValue() const
+{
+	int iBaseHappinessValue = MOD_BALANCE_VP ? 2 : 4;
+
+	if (IsEmpireVeryHappy())
+		return iBaseHappinessValue / 2;
+	else if (IsEmpireSuperUnhappy())
+		return 6 * iBaseHappinessValue;
+	else if (IsEmpireVeryUnhappy())
+		return 4 * iBaseHappinessValue;
+	else if (IsEmpireUnhappy())
+		return 2 * iBaseHappinessValue;
+	else
+		return iBaseHappinessValue;
 }
 
 /// Uprisings pop up if the empire is Very Unhappy
@@ -32919,9 +32932,12 @@ void CvPlayer::setTurnActive(bool bNewValue, bool bDoTurn) // R: bDoTurn default
 {
 	//in single player mode create autosaves after the first player's (human) turn for easier reproduction of observed AI problems
 	//also they will have the correct year in the name! hooray
-	if(!GC.getGame().isNetworkMultiPlayer() && m_eID==GC.getGame().getFirstAlivePlayer() && !bNewValue)
-		gDLL->AutoSave(false, true);
 
+	if (!GC.getGame().isNetworkMultiPlayer() && m_eID == GC.getGame().getFirstAlivePlayer() && !bNewValue)
+	{
+		//gDLL->AutoSave(false, true);
+		GC.getGame().incrementGameTurn();
+	}
 	if (!bNewValue)
 	{
 		// unfortunately the resource check doesn't work for CS because they can be gifted improvements from major civs which are connected even if the CS can't see/improve them yet...
@@ -33132,18 +33148,6 @@ void CvPlayer::setTurnActive(bool bNewValue, bool bDoTurn) // R: bDoTurn default
 
 			setEndTurn(false);
 
-			if (GET_PLAYER(GC.getGame().getActivePlayer()).isObserver() && !CvPreGame::quickMovement())
-			{
-				// in observer mode without quick movement, move the camera to the plot of the the capital on turn start
-				if (GC.getGame().getObserverUIOverridePlayer() == NO_PLAYER)
-				{
-					if (getCapitalCity())
-					{
-						CvInterfacePtr<ICvPlot1> pDllPlot = GC.WrapPlotPointer(getCapitalCity()->plot());
-						GC.GetEngineUserInterface()->lookAt(pDllPlot.get(), CAMERALOOKAT_NORMAL);
-					}
-				}
-			}
 
 			DoUnitAttrition();
 
@@ -33362,6 +33366,11 @@ void CvPlayer::setTurnActive(bool bNewValue, bool bDoTurn) // R: bDoTurn default
 			}
 
 			DLLUI->PublishPlayerTurnStatus(DLLUIClass::TURN_END, GetID());
+
+			if (GetID() == BARBARIAN_PLAYER)
+			{
+				GC.getGame().setGameTurn(GC.getGame().getGameTurn() - 1);
+			}
 		}
 	}
 	else
@@ -37517,9 +37526,16 @@ int CvPlayer::getNumResourceTotal(ResourceTypes eIndex, bool bIncludeImport) con
 
 	return iTotalNumResource;
 }
+int CvPlayer::getNumResourceFromTiles(ResourceTypes eIndex) const
+{
+	PRECONDITION(eIndex >= 0);
+	PRECONDITION(eIndex < GC.getNumResourceInfos());
+	return m_paiNumResourceFromTiles[eIndex];
+}
+
 void CvPlayer::changeNumResourceTotal(ResourceTypes eIndex, int iChange, bool bFromBuilding, bool bCheckForMonopoly, bool bFromEvent)
 {
-	ASSERT(eIndex >= 0);
+	PRECONDITION(eIndex >= 0);
 	PRECONDITION(eIndex < GC.getNumResourceInfos());
 
 	if(iChange != 0)

@@ -505,7 +505,8 @@
 #define MOD_UI_NO_RANDOM_CIV_DIALOGUE								gCustomMods.isUI_NO_RANDOM_CIV_DIALOGUE()
 
 // Turn off animations for Diplomats, Missionaries, Great Persons, etc. when playing with the Quick Movement game option enabled
-#define MOD_UI_QUICK_ANIMATIONS										gCustomMods.isUI_QUICK_ANIMATIONS()
+#define MOD_UI_QUICK_ANIMATIONS										(true)
+// gCustomMods.isUI_QUICK_ANIMATIONS()
 
 
 /////////////////////////////////////////

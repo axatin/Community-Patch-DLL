@@ -1614,7 +1614,7 @@ void CvGame::update()
 			//this creates the initial autosave
 			if(getTurnSlice() == 0 && !isPaused())
 			{
-				gDLL->AutoSave(true);
+				//gDLL->AutoSave(true);
 			}
 
 #if defined(EXTERNAL_PAUSING)
@@ -3839,6 +3839,40 @@ void CvGame::doControl(ControlTypes eControl)
 					if (eReturnPlayer != NO_PLAYER)
 					{
 						setAIAutoPlay(0, eReturnPlayer);
+
+						GET_PLAYER(eReturnPlayer).GetReligionAI()->LogReligionYieldScores();
+
+						if (GC.getGame().GetGameReligions()->CanCreatePantheon(eReturnPlayer, true) == CvGameReligions::FOUNDING_OK)
+						{
+							CvNotifications* pNotifications = GET_PLAYER(eReturnPlayer).GetNotifications();
+							if (pNotifications)
+							{
+								CvString strBuffer = GetLocalizedText("TXT_KEY_NOTIFICATION_ENOUGH_FAITH_FOR_PANTHEON");
+
+								CvString strSummary = GetLocalizedText("TXT_KEY_NOTIFICATION_SUMMARY_ENOUGH_FAITH_FOR_PANTHEON");
+								pNotifications->Add(NOTIFICATION_FOUND_PANTHEON, strBuffer, strSummary, -1, -1, -1);
+							}
+						}
+						else if (GET_PLAYER(eReturnPlayer).GetReligions()->IsFoundingReligion())
+						{
+							CvNotifications* pNotifications = GET_PLAYER(eReturnPlayer).GetNotifications();
+							if (pNotifications)
+							{
+								CvString strBuffer = GetLocalizedText("TXT_KEY_NOTIFICATION_FOUND_RELIGION");
+								CvString strSummary = GetLocalizedText("TXT_KEY_NOTIFICATION_SUMMARY_FOUND_RELIGION");
+								pNotifications->Add(NOTIFICATION_FOUND_RELIGION, strBuffer, strSummary, GET_PLAYER(eReturnPlayer).getCapitalCity()->getX(), GET_PLAYER(eReturnPlayer).getCapitalCity()->getY(), -1, GET_PLAYER(eReturnPlayer).getCapitalCityID());
+							}
+						}
+						else if (GET_PLAYER(eReturnPlayer).GetReligions()->OwnsReligion())
+						{
+							CvNotifications* pNotifications = GET_PLAYER(eReturnPlayer).GetNotifications();
+							if (pNotifications)
+							{
+								CvString strBuffer = GetLocalizedText("TXT_KEY_NOTIFICATION_ADD_REFORMATION_BELIEF");
+								CvString strSummary = GetLocalizedText("TXT_KEY_NOTIFICATION_SUMMARY_ADD_REFORMATION_BELIEF");
+								pNotifications->Add(NOTIFICATION_ADD_REFORMATION_BELIEF, strBuffer, strSummary, -1, -1, -1);
+							}
+						}
 					}
 				}
 				else
@@ -5420,7 +5454,7 @@ void CvGame::setAIAutoPlay(int iNewValue, PlayerTypes eReturnAsPlayer)
 
 			if (getObserverUIOverridePlayer() == NO_PLAYER)
 			{
-				SetAllPlotsVisible(GET_PLAYER((PlayerTypes)iObserver).getTeam());
+				//SetAllPlotsVisible(GET_PLAYER((PlayerTypes)iObserver).getTeam());
 			}
 			else
 			{
@@ -8407,6 +8441,13 @@ void CvGame::doTurn()
 
 	OutputDebugString(CvString::format("Turn\t%03i\tTime\t%012u\tThread\t%d\n", getGameTurn(), GetTickCount(), GetCurrentThreadId()));
 	incrementGameTurn();
+	if (GC.getGame().getGameTurn() == 115)
+	{
+		gDLL->AutoSave(false);
+		// end the game here
+		SetPreconditionFired();
+		UNREACHABLE();
+	}
 	incrementElapsedGameTurns();
 	gDLL->PublishNewGameTurn(getGameTurn());
 
@@ -8529,7 +8570,7 @@ void CvGame::doTurn()
 	if (isNetworkMultiPlayer())
 	{
 		//autosave after doing a turn
-		gDLL->AutoSave(false, false);
+		//gDLL->AutoSave(false, false);
 
 		// send desync warning, if applicable
 		if (isDesynced())
