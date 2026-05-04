@@ -1614,7 +1614,7 @@ void CvGame::update()
 			//this creates the initial autosave
 			if(getTurnSlice() == 0 && !isPaused())
 			{
-				//gDLL->AutoSave(true);
+				gDLL->AutoSave(true);
 			}
 
 #if defined(EXTERNAL_PAUSING)
@@ -8570,7 +8570,7 @@ void CvGame::doTurn()
 	if (isNetworkMultiPlayer())
 	{
 		//autosave after doing a turn
-		//gDLL->AutoSave(false, false);
+		gDLL->AutoSave(false, false);
 
 		// send desync warning, if applicable
 		if (isDesynced())

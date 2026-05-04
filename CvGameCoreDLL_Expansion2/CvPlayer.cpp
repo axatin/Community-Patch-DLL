@@ -32935,7 +32935,7 @@ void CvPlayer::setTurnActive(bool bNewValue, bool bDoTurn) // R: bDoTurn default
 
 	if (!GC.getGame().isNetworkMultiPlayer() && m_eID == GC.getGame().getFirstAlivePlayer() && !bNewValue)
 	{
-		//gDLL->AutoSave(false, true);
+		gDLL->AutoSave(false, true);
 		GC.getGame().incrementGameTurn();
 	}
 	if (!bNewValue)

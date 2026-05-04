@@ -609,7 +609,7 @@ void CvGameReligions::DoPlayerTurn(CvPlayer& kPlayer)
 	{
 		if(CanCreatePantheon(kPlayer.GetID(), true) == FOUNDING_OK)
 		{
-			CvNotifications* pNotifications = kPlayer.GetNotifications();
+			/*CvNotifications* pNotifications = kPlayer.GetNotifications();
 			if (pNotifications)
 			{
 				CvString strBuffer = GetLocalizedText("TXT_KEY_NOTIFICATION_ENOUGH_FAITH_FOR_PANTHEON");
@@ -617,7 +617,8 @@ void CvGameReligions::DoPlayerTurn(CvPlayer& kPlayer)
 				CvString strSummary = GetLocalizedText("TXT_KEY_NOTIFICATION_SUMMARY_ENOUGH_FAITH_FOR_PANTHEON");
 				pNotifications->Add(NOTIFICATION_FOUND_PANTHEON, strBuffer, strSummary, -1, -1, -1);
 			}
-			gDLL->AutoSave(false);
+			gDLL->AutoSave(false);*/
+			GC.getGame().setAIAutoPlay(0, ePlayer);
 
 			// Create the pantheon
 			if(kPlayer.isHuman(ISHUMAN_AI_RELIGION_CHOICE))
@@ -654,18 +655,17 @@ void CvGameReligions::DoPlayerTurn(CvPlayer& kPlayer)
 	ReligionTypes eOwnedReligion = GET_PLAYER(ePlayer).GetReligions()->GetOwnedReligion();
 	if (eOwnedReligion != NO_RELIGION && !HasAddedReformationBelief(ePlayer) && (kPlayer.GetPlayerPolicies()->HasPolicyGrantingReformationBelief() || kPlayer.IsReformation()))
 	{
+		GC.getGame().setAIAutoPlay(0, ePlayer);
 		if (!kPlayer.isHuman(ISHUMAN_AI_RELIGION_CHOICE)) // continue from here
 		{
-			CvNotifications* pNotifications = kPlayer.GetNotifications();
+			/*CvNotifications* pNotifications = kPlayer.GetNotifications();
 			if (pNotifications)
 			{
 				CvString strBuffer = GetLocalizedText("TXT_KEY_NOTIFICATION_ADD_REFORMATION_BELIEF");
 				CvString strSummary = GetLocalizedText("TXT_KEY_NOTIFICATION_SUMMARY_ADD_REFORMATION_BELIEF");
 				pNotifications->Add(NOTIFICATION_ADD_REFORMATION_BELIEF, strBuffer, strSummary, -1, -1, -1);
 			}
-			gDLL->AutoSave(false);
-			// switch to AI player again
-			// GC.getGame().setAIAutoPlay(9999, PlayerTypes(0));
+			gDLL->AutoSave(false);*/
 
 
 			BeliefTypes eReformationBelief = kPlayer.GetReligionAI()->ChooseReformationBelief(ePlayer, eOwnedReligion);
@@ -6209,20 +6209,20 @@ int CvReligionAI::GetNumCitiesToSpreadReligionTo(ReligionTypes eReligion, bool b
 		iNumReligionsStillToFound--;
 	if (iNumReligionsStillToFound > 0)
 	{
-		int iOtherPlayersWithoutReligion = 0;
+		int iOtherPlayersWithPantheon = 0;
 		int iMajorLoop;
 		for (iMajorLoop = 0; iMajorLoop < MAX_MAJOR_CIVS; iMajorLoop++)
 		{
 			// players without a religion, but with a pantheon
 			if (GET_PLAYER((PlayerTypes)iMajorLoop).isAlive() && iMajorLoop != m_pPlayer->GetID() && GET_PLAYER((PlayerTypes)iMajorLoop).GetReligions()->GetStateReligion(false) == NO_RELIGION && GET_PLAYER((PlayerTypes)iMajorLoop).GetReligions()->GetStateReligion(true) != NO_RELIGION)
 			{
-				iOtherPlayersWithoutReligion++;
+				iOtherPlayersWithPantheon++;
 			}
 		}
 
-		// assume all players who haven't founded yet have an equal chance of founding
-		if (iOtherPlayersWithoutReligion > 0)
-			iForeignCityPercentMultiplier = 100 * (iOtherPlayersWithoutReligion - iNumReligionsStillToFound) / iOtherPlayersWithoutReligion;
+		// assume all players with a pantheon who haven't founded yet have an equal chance of founding
+		if (iOtherPlayersWithPantheon > 0)
+			iForeignCityPercentMultiplier = min(100 * iNumReligionsStillToFound / iOtherPlayersWithPantheon, 100);
 	}
 
 	int iNumTotalCities = 0;
@@ -6237,45 +6237,53 @@ int CvReligionAI::GetNumCitiesToSpreadReligionTo(ReligionTypes eReligion, bool b
 
 			int iNumCities = 0;
 			int iLoop = 0;
-			CvCity* pLoopCity = NULL;
-			for (pLoopCity = kLoopPlayer.firstCity(&iLoop); pLoopCity != NULL; pLoopCity = kLoopPlayer.nextCity(&iLoop))
-			{				
-				if (pLoopCity->GetCityReligions()->GetReligiousMajority() != eReligion)
+			if (bFoundingReligion)
+			{
+				iNumCities = kLoopPlayer.getNumCities();
+			}
+			else
+			{
+				CvCity* pLoopCity = NULL;
+				for (pLoopCity = kLoopPlayer.firstCity(&iLoop); pLoopCity != NULL; pLoopCity = kLoopPlayer.nextCity(&iLoop))
 				{
-					iNumCities++;
+					if (pLoopCity->GetCityReligions()->GetReligiousMajority() != eReligion)
+					{
+						iNumCities++;
+					}
 				}
 			}
 
+			int iMod = 100;
 			// Always convert our own cities
 			if (kLoopPlayer.GetID() != m_pPlayer->GetID())
 			{
 				// only reduce score for players with a pantheon, players without one probably won't found
 				if (kLoopPlayer.GetReligions()->GetStateReligion(true) != NO_RELIGION)
 				{
-					iNumCities *= iForeignCityPercentMultiplier;
-					iNumCities /= 100;
+					iMod *= iForeignCityPercentMultiplier;
+					iMod /= 100;
 				}
 
-				if (!kLoopPlayer.GetReligions()->OwnsReligion(true) || kLoopPlayer.GetPlayerTraits()->IsAlwaysReligion())
+				if (kLoopPlayer.GetReligions()->OwnsReligion(true) || kLoopPlayer.GetPlayerTraits()->IsAlwaysReligion())
 				{
-					iNumCities /= 4;
+					iMod /= 4;
 				}
 
-				if (kLoopPlayer.GetProximityToPlayer(m_pPlayer->GetID()) == PLAYER_PROXIMITY_CLOSE)
+				if (kLoopPlayer.GetProximityToPlayer(m_pPlayer->GetID()) == PLAYER_PROXIMITY_NEIGHBORS)
 				{
-					iNumCities /= 2;
+					iMod /= 2;
 				}
 				else if (kLoopPlayer.GetProximityToPlayer(m_pPlayer->GetID()) == PLAYER_PROXIMITY_FAR)
 				{
-					iNumCities /= 4;
+					iMod /= 4;
 				}
 				else if (kLoopPlayer.GetProximityToPlayer(m_pPlayer->GetID()) == PLAYER_PROXIMITY_DISTANT)
 				{
-					iNumCities /= 8;
+					iMod /= 8;
 				}
 			}
 
-			iNumTotalCities += iNumCities;
+			iNumTotalCities += (iNumCities * iMod / 100);
 		}
 	}
 
@@ -8075,7 +8083,7 @@ int CvReligionAI::GetValidPlotYieldTimes100(CvBeliefEntry* pEntry, CvPlot* pPlot
 			if ((eTerrain == TERRAIN_DESERT || eTerrain == TERRAIN_TUNDRA) && eFeature == NO_FEATURE && eResource == NO_RESOURCE && !pPlot->isHills())
 			{
 				// desert and tundra tiles without features, resources or hills are unlikely to be worked
-				iModifier = 30;
+				iModifier = 25;
 			}
 			iRtnValue += iTerrainYieldChangeTimes100 * iModifier / 100;
 		}
@@ -9070,22 +9078,44 @@ int CvReligionAI::ScoreBeliefForPlayer(CvBeliefEntry* pEntry, ReligionTypes eFor
 			{
 				int iProximityScore = kLoopPlayer.GetProximityToPlayer(m_pPlayer->GetID()) == PLAYER_PROXIMITY_NEIGHBORS ? 2 : 1;
 				iNumNeighbors += iProximityScore;
+
+				int iDangerScore = 0;
 				CvPlayerTraits* pLoopPlayerTraits = kLoopPlayer.GetPlayerTraits();
-
-				int iNeighborWarScore = 0;
-
 				if (m_pPlayer->IsAtWarWith((PlayerTypes)iPlayerLoop))
 				{
 					int iWarScore = pDiploAI->GetWarScore((PlayerTypes)iPlayerLoop);
-					// base value of 4, more if we're losing, less if we're winning the war
-					iNeighborWarScore = max(1, 4 - (iWarScore / 2));
+					// high danger score if we're losing the war
+					iDangerScore = iProximityScore * max(1, 3 - (iWarScore / 3));
 				}
-				else if (kLoopPlayer.GetDiplomacyAI()->GetSurfaceApproach(m_pPlayer->GetID()) == CIV_APPROACH_HOSTILE)
-					iNeighborWarScore = 3;
-				else if (pLoopPlayerTraits->IsWarmonger() || kLoopPlayer.GetPlayerPolicies()->IsPolicyBranchUnlocked(eAuthority))
-					iNeighborWarScore = 2;
+				else if (kLoopPlayer.GetDiplomacyAI()->GetSurfaceApproach(m_pPlayer->GetID()) != CIV_APPROACH_FRIENDLY && (pLoopPlayerTraits->IsWarmonger() || kLoopPlayer.GetPlayerPolicies()->IsPolicyBranchUnlocked(eAuthority)))
+				{
+					iDangerScore = iProximityScore;
+					if (kLoopPlayer.GetDiplomacyAI()->GetSurfaceApproach(m_pPlayer->GetID()) == CIV_APPROACH_HOSTILE)
+						iDangerScore *= 2;
 
-				iNeighborWarmongerThreat += iProximityScore * iNeighborWarScore;
+					switch (pDiploAI->GetMilitaryStrengthComparedToUs((PlayerTypes)iPlayerLoop))
+					{
+					case STRENGTH_IMMENSE:
+						iDangerScore *= 300;
+						break;
+					case STRENGTH_POWERFUL:
+						iDangerScore *= 200;
+						break;
+					case STRENGTH_STRONG:
+						iDangerScore *= 100;
+						break;
+					case STRENGTH_AVERAGE:
+						iDangerScore *= 50;
+						break;
+					default:
+						// don't need to worry about them
+						iDangerScore *= 0;
+						break;
+					}
+					iDangerScore /= 100;
+				}
+				
+				iNeighborWarmongerThreat += iDangerScore;
 			}
 
 		}
@@ -9318,7 +9348,7 @@ int CvReligionAI::ScoreBeliefForPlayer(CvBeliefEntry* pEntry, ReligionTypes eFor
 
 	if (pEntry->GetFriendlyHealChange() > 0)
 	{
-		iDefenseTemp += iDefensePriority * iNumUnits * pEntry->GetFriendlyHealChange() / 10;
+		iDefenseTemp += iDefensePriority * iNumUnits * pEntry->GetFriendlyHealChange() / 15;
 	}
 	if (pEntry->GetCityRangeStrikeModifier() > 0)
 	{

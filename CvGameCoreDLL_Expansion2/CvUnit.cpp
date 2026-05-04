@@ -10876,6 +10876,8 @@ bool CvUnit::DoFoundReligion()
 
 			kOwner.GetReligions()->SetFoundingReligion(true);
 
+			GC.getGame().setAIAutoPlay(0, getOwner());
+
 			if(kOwner.isHuman(ISHUMAN_AI_RELIGION_CHOICE))
 			{
 				ASSERT(pkCity != NULL, "No City??");
@@ -10896,14 +10898,14 @@ bool CvUnit::DoFoundReligion()
 			}
 			else
 			{
-				CvNotifications* pNotifications = kOwner.GetNotifications();
+				/*CvNotifications* pNotifications = kOwner.GetNotifications();
 				if (pNotifications)
 				{
 					CvString strBuffer = GetLocalizedText("TXT_KEY_NOTIFICATION_FOUND_RELIGION");
 					CvString strSummary = GetLocalizedText("TXT_KEY_NOTIFICATION_SUMMARY_FOUND_RELIGION");
 					pNotifications->Add(NOTIFICATION_FOUND_RELIGION, strBuffer, strSummary, pkPlot->getX(), pkPlot->getY(), -1, pkCity->GetID());
 				}
-				gDLL->AutoSave(false);
+				gDLL->AutoSave(false);*/
 
 
 				ReligionTypes eReligion = pReligions->GetReligionToFound(getOwner());
@@ -11043,6 +11045,8 @@ bool CvUnit::DoEnhanceReligion()
 				finishMoves();
 			}
 
+			GC.getGame().setAIAutoPlay(0, getOwner());
+
 			if(kOwner.isHuman(ISHUMAN_AI_RELIGION_CHOICE))
 			{
 				ASSERT(pkCity != NULL, "No City??");
@@ -11063,14 +11067,14 @@ bool CvUnit::DoEnhanceReligion()
 			}
 			else
 			{
-				CvNotifications* pNotifications = kOwner.GetNotifications();
+				/*CvNotifications* pNotifications = kOwner.GetNotifications();
 				if (pNotifications)
 				{
 					CvString strBuffer = GetLocalizedText("TXT_KEY_NOTIFICATION_ENHANCE_RELIGION");
 					CvString strSummary = GetLocalizedText("TXT_KEY_NOTIFICATION_SUMMARY_ENHANCE_RELIGION");
 					pNotifications->Add(NOTIFICATION_ENHANCE_RELIGION, strBuffer, strSummary, pkPlot->getX(), pkPlot->getY(), -1, pkCity->GetID());
 				}
-				gDLL->AutoSave(false);
+				gDLL->AutoSave(false);*/
 				// switch to AI player again
 
 
