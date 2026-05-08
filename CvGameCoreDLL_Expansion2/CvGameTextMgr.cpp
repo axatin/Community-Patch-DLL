@@ -55,6 +55,10 @@ void CvGameTextMgr::setYearStr(CvString& strString, int iGameTurn, bool bSave, C
 			strString = GetLocalizedText("TXT_KEY_TIME_AD", 1);
 		}
 	}
+	if (bSave)
+	{
+		strString = GC.getGame().m_t + "_" + strString;
+	}
 }
 
 void CvGameTextMgr::setDateStr(CvString& strString, int iGameTurn, bool bSave, CalendarTypes eCalendar, int iStartYear, GameSpeedTypes eSpeed)

@@ -609,16 +609,23 @@ void CvGameReligions::DoPlayerTurn(CvPlayer& kPlayer)
 	{
 		if(CanCreatePantheon(kPlayer.GetID(), true) == FOUNDING_OK)
 		{
-			/*CvNotifications* pNotifications = kPlayer.GetNotifications();
-			if (pNotifications)
+			if (GD_INT_GET(CIRCUMNAVIGATE_FREE_MOVES))
 			{
-				CvString strBuffer = GetLocalizedText("TXT_KEY_NOTIFICATION_ENOUGH_FAITH_FOR_PANTHEON");
+				CvNotifications* pNotifications = kPlayer.GetNotifications();
+				if (pNotifications)
+				{
+					CvString strBuffer = GetLocalizedText("TXT_KEY_NOTIFICATION_ENOUGH_FAITH_FOR_PANTHEON");
 
-				CvString strSummary = GetLocalizedText("TXT_KEY_NOTIFICATION_SUMMARY_ENOUGH_FAITH_FOR_PANTHEON");
-				pNotifications->Add(NOTIFICATION_FOUND_PANTHEON, strBuffer, strSummary, -1, -1, -1);
+					CvString strSummary = GetLocalizedText("TXT_KEY_NOTIFICATION_SUMMARY_ENOUGH_FAITH_FOR_PANTHEON");
+					pNotifications->Add(NOTIFICATION_FOUND_PANTHEON, strBuffer, strSummary, -1, -1, -1);
+				}
+				GC.getGame().m_t = "Pantheon_" + CvString(kPlayer.getCivilizationShortDescription());
+				gDLL->AutoSave(false);
 			}
-			gDLL->AutoSave(false);*/
-			GC.getGame().setAIAutoPlay(0, ePlayer);
+			else
+			{
+				GC.getGame().setAIAutoPlay(0, ePlayer);
+			}
 
 			// Create the pantheon
 			if(kPlayer.isHuman(ISHUMAN_AI_RELIGION_CHOICE))
@@ -655,17 +662,24 @@ void CvGameReligions::DoPlayerTurn(CvPlayer& kPlayer)
 	ReligionTypes eOwnedReligion = GET_PLAYER(ePlayer).GetReligions()->GetOwnedReligion();
 	if (eOwnedReligion != NO_RELIGION && !HasAddedReformationBelief(ePlayer) && (kPlayer.GetPlayerPolicies()->HasPolicyGrantingReformationBelief() || kPlayer.IsReformation()))
 	{
-		GC.getGame().setAIAutoPlay(0, ePlayer);
+		if (!GD_INT_GET(CIRCUMNAVIGATE_FREE_MOVES))
+			GC.getGame().setAIAutoPlay(0, ePlayer);
+
 		if (!kPlayer.isHuman(ISHUMAN_AI_RELIGION_CHOICE)) // continue from here
 		{
-			/*CvNotifications* pNotifications = kPlayer.GetNotifications();
-			if (pNotifications)
+			if (GD_INT_GET(CIRCUMNAVIGATE_FREE_MOVES))
 			{
-				CvString strBuffer = GetLocalizedText("TXT_KEY_NOTIFICATION_ADD_REFORMATION_BELIEF");
-				CvString strSummary = GetLocalizedText("TXT_KEY_NOTIFICATION_SUMMARY_ADD_REFORMATION_BELIEF");
-				pNotifications->Add(NOTIFICATION_ADD_REFORMATION_BELIEF, strBuffer, strSummary, -1, -1, -1);
+				CvNotifications* pNotifications = kPlayer.GetNotifications();
+				if (pNotifications)
+				{
+					CvString strBuffer = GetLocalizedText("TXT_KEY_NOTIFICATION_ADD_REFORMATION_BELIEF");
+					CvString strSummary = GetLocalizedText("TXT_KEY_NOTIFICATION_SUMMARY_ADD_REFORMATION_BELIEF");
+					pNotifications->Add(NOTIFICATION_ADD_REFORMATION_BELIEF, strBuffer, strSummary, -1, -1, -1);
+				}
+
+				GC.getGame().m_t = "Reformation_" + CvString(kPlayer.getCivilizationShortDescription());
+				gDLL->AutoSave(false);
 			}
-			gDLL->AutoSave(false);*/
 
 
 			BeliefTypes eReformationBelief = kPlayer.GetReligionAI()->ChooseReformationBelief(ePlayer, eOwnedReligion);
@@ -8529,7 +8543,7 @@ int CvReligionAI::ScoreBeliefAtCity(CvBeliefEntry* pEntry, CvCity* pCity, Religi
 				{
 					TechTypes ePrereqTech = (TechTypes)pkBuildingInfo->GetPrereqAndTech();
 					
-					if (ePrereqTech == NO_TECH || GET_TEAM(m_pPlayer->getTeam()).GetTeamTechs()->HasTech(ePrereqTech))
+					if (ePrereqTech == NO_TECH || GET_TEAM(m_pPlayer->getTeam()).GetTeamTechs()->HasTech(ePrereqTech) || m_pPlayer->GetPlayerTechs()->GetCurrentResearch() == ePrereqTech)
 					{
 						iAvailabilityModifier = 6;
 					}
@@ -9448,7 +9462,30 @@ int CvReligionAI::ScoreBeliefForPlayer(CvBeliefEntry* pEntry, ReligionTypes eFor
 		}
 		if (pEntry->GetSpreadDistanceModifier() != 0)
 		{
-			iPassiveSpreadTemp += pEntry->GetSpreadDistanceModifier() * iNumCitiesWithReligionTotal;
+			iPassiveSpreadTemp += pEntry->GetSpreadDistanceModifier() * iNumCitiesWithReligionTotal * 3;
+		}
+
+
+		if (pEntry->GetSpreadStrengthModifier() != 0)
+		{
+			iPassiveSpreadTemp += pEntry->GetSpreadStrengthModifier() * iNumCitiesWithReligionTotal * 2;
+			if (pEntry->GetSpreadModifierDoublingTech() != NO_TECH)
+			{
+				TechTypes eDoublingTech = pEntry->GetSpreadModifierDoublingTech();
+				int iAvailabilityMod;
+				if (m_pPlayer->HasTech(eDoublingTech) || m_pPlayer->GetPlayerTechs()->GetCurrentResearch() == eDoublingTech)
+				{
+					iAvailabilityMod = 10;
+				}
+				else
+				{
+					CvTechEntry* pkTechInfo = GC.getTechInfo(eDoublingTech);
+					int iEraNeeded = pkTechInfo->GetEra();
+					int iCurrentEra = m_pPlayer->GetCurrentEra();
+					iAvailabilityMod = max(0, 7 - 3 * (iEraNeeded - iCurrentEra));
+				}
+				iPassiveSpreadTemp += pEntry->GetSpreadStrengthModifier() * iNumCitiesWithReligionTotal * 2 * iAvailabilityMod / 10;
+			}
 		}
 		
 		// passive spread is good if we can't build missionaries
@@ -9496,9 +9533,20 @@ int CvReligionAI::ScoreBeliefForPlayer(CvBeliefEntry* pEntry, ReligionTypes eFor
 		if (pEntry->GetGoldPerXFollowers() > 0)
 		{
 			// score only foreign cities, owned cities have already been scored in ScoreBeliefForCity
-			iRtnValue += 30 * (iNumNearbyCitiesToSpreadTo - (m_pPlayer->getNumCities() - iNumOurCitiesWithReligion)) * ScoreYieldForReligionTimes100(YIELD_GOLD) / 100 / pEntry->GetGoldPerXFollowers();
+			iActiveSpreadTemp += 30 * (iNumNearbyCitiesToSpreadTo - (m_pPlayer->getNumCities() - iNumOurCitiesWithReligion)) * ScoreYieldForReligionTimes100(YIELD_GOLD) / 100 / pEntry->GetGoldPerXFollowers();
 		}
 	}
+	// modifiers
+	if (bReligionSpreadFocus)
+		iActiveSpreadTemp *= 2;
+	if (bReligionGPFocus)
+	{
+		iActiveSpreadTemp *= 2;
+		iActiveSpreadTemp /= 3;
+	}
+	if (bReligionBuyUnitsFocus)
+		iActiveSpreadTemp /= 2;
+
 	iRtnValue += iActiveSpreadTemp;
 
 	//////////////////

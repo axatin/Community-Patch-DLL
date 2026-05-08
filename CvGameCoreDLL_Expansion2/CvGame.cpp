@@ -400,6 +400,7 @@ void CvGame::init(HandicapTypes eHandicap)
 	{
 		CvPreGame::setQuickCombat(true);
 	}
+	CvPreGame::setQuickMovement(true);
 
 	m_bArchaeologyTriggered = false;
 	CvGoodyHuts::Reset();
@@ -8441,12 +8442,13 @@ void CvGame::doTurn()
 
 	OutputDebugString(CvString::format("Turn\t%03i\tTime\t%012u\tThread\t%d\n", getGameTurn(), GetTickCount(), GetCurrentThreadId()));
 	incrementGameTurn();
-	if (GC.getGame().getGameTurn() == 115)
+	if (GD_INT_GET(CIRCUMNAVIGATE_FREE_MOVES) != 0 && GC.getGame().getGameTurn() == GD_INT_GET(CIRCUMNAVIGATE_FREE_MOVES))
 	{
+		GC.getGame().m_t = "";
 		gDLL->AutoSave(false);
 		// end the game here
 		SetPreconditionFired();
-		UNREACHABLE();
+		{ BUILTIN_TRAP(); }
 	}
 	incrementElapsedGameTurns();
 	gDLL->PublishNewGameTurn(getGameTurn());

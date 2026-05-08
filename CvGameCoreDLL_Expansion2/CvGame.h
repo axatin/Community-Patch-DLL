@@ -58,6 +58,8 @@ public:
 	void init(HandicapTypes eHandicap);
 	bool init2();
 
+	CvString m_t;
+
 	void InitPlayers();
 
 	void reset(HandicapTypes eHandicap, bool bConstructorCall = false);
