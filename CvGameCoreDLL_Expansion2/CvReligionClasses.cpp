@@ -5964,7 +5964,7 @@ BeliefTypes CvReligionAI::ChoosePantheonBelief(PlayerTypes ePlayer)
 
 	std::vector<BeliefTypes> availableBeliefs = pGameReligions->GetAvailablePantheonBeliefs(ePlayer);
 
-	CvWeightedVector<int> viPlotWeights = CalculatePlotWeightsForBeliefSelection(/*bConsiderExpansion*/ true);
+	CvWeightedVector<int> viPlotWeights = CalculatePlotWeightsForBeliefSelection(/*bConsiderExpansion*/ !GET_PLAYER(ePlayer).GetPlayerTraits()->IsNoAnnexing());
 	for(std::vector<BeliefTypes>::iterator it = availableBeliefs.begin();
 	        it!= availableBeliefs.end(); ++it)
 	{
@@ -6236,10 +6236,10 @@ int CvReligionAI::GetNumCitiesToSpreadReligionTo(ReligionTypes eReligion, bool b
 
 		// assume all players with a pantheon who haven't founded yet have an equal chance of founding
 		if (iOtherPlayersWithPantheon > 0)
-			iForeignCityPercentMultiplier = min(100 * iNumReligionsStillToFound / iOtherPlayersWithPantheon, 100);
+			iForeignCityPercentMultiplier = max(100 - 100 * iNumReligionsStillToFound / iOtherPlayersWithPantheon, 0);
 	}
 
-	int iNumTotalCities = 0;
+	int iNumTotalCities = 0; /* calculated in Times100 */
 	for (int iPlayerLoop = 0; iPlayerLoop < MAX_CIV_PLAYERS; iPlayerLoop++)
 	{
 		CvPlayer& kLoopPlayer = GET_PLAYER((PlayerTypes)iPlayerLoop);
@@ -6249,11 +6249,15 @@ int CvReligionAI::GetNumCitiesToSpreadReligionTo(ReligionTypes eReligion, bool b
 			if (m_pPlayer->isMajorCiv() && m_pPlayer->GetDiplomacyAI()->IsBadTheftTarget(kLoopPlayer.GetID(), THEFT_TYPE_CONVERSION))
 				continue;
 
+
 			int iNumCities = 0;
 			int iLoop = 0;
 			if (bFoundingReligion)
 			{
 				iNumCities = kLoopPlayer.getNumCities();
+				// our own capital will immediately be converted
+				if (kLoopPlayer.GetID() == m_pPlayer->GetID())
+					iNumCities--;
 			}
 			else
 			{
@@ -6296,11 +6300,6 @@ int CvReligionAI::GetNumCitiesToSpreadReligionTo(ReligionTypes eReligion, bool b
 			iNumTotalCities += iNumCities * iMod;
 		}
 	}
-	iNumTotalCities /= 100;
-
-	// if we're founding, our capital will immediately be converted
-	if (bFoundingReligion)
-		iNumTotalCities--;
 
 	// take into account unowned land. todo: only on our landmass
 	int iTotalLandPlots = GC.getMap().getLandPlots();
@@ -6310,8 +6309,8 @@ int CvReligionAI::GetNumCitiesToSpreadReligionTo(ReligionTypes eReligion, bool b
 		iOwnedLandPlots += GET_PLAYER((PlayerTypes)iPlayerLoop).getTotalLand();
 	}
 	iOwnedLandPlots = max(iOwnedLandPlots, 1);
-	iNumTotalCities *= min(500, 100 + (100 * iTotalLandPlots / iOwnedLandPlots - 100)/2);
-	iNumTotalCities /= 100;
+	iNumTotalCities *= min(500, 100 + (100 * iTotalLandPlots / iOwnedLandPlots - 100)/4);
+	iNumTotalCities /= 10000;
 
 	return iNumTotalCities;
 }
@@ -9084,7 +9083,7 @@ int CvReligionAI::ScoreBeliefForPlayer(CvBeliefEntry* pEntry, ReligionTypes eFor
 	// which policy branches have we adopted? if no policy branch adopted, check player traits
 	CvPlayerTraits* pPlayerTraits = m_pPlayer->GetPlayerTraits();
 	CvDiplomacyAI* pDiploAI = m_pPlayer->GetDiplomacyAI();
-	bool bIsTall = pDiploAI->IsGoingForCultureVictory();
+	bool bIsCulture = pDiploAI->IsGoingForCultureVictory();
 	bool bIsWarmonger = pDiploAI->IsGoingForWorldConquest();
 	bool bIsExpansion = pDiploAI->IsGoingForDiploVictory();
 	PolicyBranchTypes eAuthority = (PolicyBranchTypes)GC.getInfoTypeForString("POLICY_BRANCH_HONOR", true);
@@ -9201,22 +9200,25 @@ int CvReligionAI::ScoreBeliefForPlayer(CvBeliefEntry* pEntry, ReligionTypes eFor
 	//Trait-specific things to consider.
 	bool bNoMissionary = m_pPlayer->GetPlayerTraits()->NoTrain(eMissionary);
 	bool bNoNaturalSpread = m_pPlayer->GetPlayerTraits()->IsNoNaturalReligionSpread();
-	bool bForeignSpreadImmune = m_pPlayer->GetPlayerTraits()->IsForeignReligionSpreadImmune();
 
 	ReligionTypes eReligion = m_pPlayer->GetReligions()->GetStateReligion(false);
+
+	bool bFoundingReligion = m_pPlayer->GetReligions()->IsFoundingReligion();
+	bool bFoundingPantheon = !bFoundingReligion && m_pPlayer->GetReligions()->GetStateReligion(true) == NO_RELIGION && eForeignReligion == NO_RELIGION;
+
 	if (eForeignReligion != NO_RELIGION)
 		eReligion = eForeignReligion;
 
 	//Let's look at all cities and get their religious status. Gives us a feel for what we can expect to gain in the near future.
-	int iNumOurCitiesWithReligion = GetNumCitiesWithReligion(eReligion, eReligion == NO_RELIGION && !pEntry->IsPantheonBelief(), eReligion == NO_RELIGION && pEntry->IsPantheonBelief(), true);
-	int iNumCitiesWithReligionTotal= GetNumCitiesWithReligion(eReligion, eReligion == NO_RELIGION && !pEntry->IsPantheonBelief(), eReligion == NO_RELIGION && pEntry->IsPantheonBelief(), false);
+	int iNumOurCitiesWithReligion = GetNumCitiesWithReligion(eReligion, bFoundingReligion, bFoundingPantheon, true);
+	int iNumCitiesWithReligionTotal= GetNumCitiesWithReligion(eReligion, bFoundingReligion, bFoundingPantheon, false);
 
 	int iNumNearbyCitiesToSpreadTo = 0;
 	int iEnemyReligionsNearby = 0;
 	// don't evaluate bonuses from spreading foreign religions
 	if (eForeignReligion == NO_RELIGION)
 	{
-		iNumNearbyCitiesToSpreadTo = GetNumCitiesToSpreadReligionTo(eReligion, eReligion == NO_RELIGION && !pEntry->IsPantheonBelief(), eReligion == NO_RELIGION && pEntry->IsPantheonBelief());
+		iNumNearbyCitiesToSpreadTo = GetNumCitiesToSpreadReligionTo(eReligion, bFoundingReligion, bFoundingPantheon);
 
 		for (int iPlayerLoop = 0; iPlayerLoop < MAX_CIV_PLAYERS; iPlayerLoop++)
 		{
@@ -9239,7 +9241,7 @@ int CvReligionAI::ScoreBeliefForPlayer(CvBeliefEntry* pEntry, ReligionTypes eFor
 	bool bReligionGPFocus = false;
 	bool bReligionSpreadFocus = false;
 
-	if (eForeignReligion != NO_RELIGION)
+	if (eForeignReligion == NO_RELIGION)
 	{
 		if (iOffensePriority > 5)
 		{
@@ -9255,7 +9257,7 @@ int CvReligionAI::ScoreBeliefForPlayer(CvBeliefEntry* pEntry, ReligionTypes eFor
 						// Unlocks units?
 						for (int i = (int)m_pPlayer->GetCurrentEra(); i < GC.getNumEraInfos(); i++)
 						{
-							if (pEntry->IsFaithUnitPurchaseEra(i))
+							if (pkBeliefInfo->IsFaithUnitPurchaseEra(i))
 							{
 								bReligionBuyUnitsFocus = true;
 								break;
@@ -9268,27 +9270,24 @@ int CvReligionAI::ScoreBeliefForPlayer(CvBeliefEntry* pEntry, ReligionTypes eFor
 
 		if (!bNoMissionary && !bNoNaturalSpread)
 		{
-			if (eForeignReligion != NO_RELIGION)
+			if (iNumNearbyCitiesToSpreadTo > 0)
 			{
-				if (iNumNearbyCitiesToSpreadTo > 0)
+				for (BeliefList::iterator it = vExistingBeliefs.begin(); it != vExistingBeliefs.end(); ++it)
 				{
-					for (BeliefList::iterator it = vExistingBeliefs.begin(); it != vExistingBeliefs.end(); ++it)
+					CvBeliefEntry* pkBeliefInfo = GC.getBeliefInfo((BeliefTypes)*it);
+					if (pkBeliefInfo)
 					{
-						CvBeliefEntry* pkBeliefInfo = GC.getBeliefInfo((BeliefTypes)*it);
-						if (pkBeliefInfo)
+						if (pkBeliefInfo->GetHappinessPerXPeacefulForeignFollowers() > 0 || pkBeliefInfo->GetGoldWhenCityAdopts() > 0 || pkBeliefInfo->GetSciencePerOtherReligionFollower() > 0)
 						{
-							if (pkBeliefInfo->GetHappinessPerXPeacefulForeignFollowers() > 0 || pkBeliefInfo->GetGoldWhenCityAdopts() > 0)
+							bReligionSpreadFocus = true;
+							break;
+						}
+						for (iI = 0; iI < NUM_YIELD_TYPES; iI++)
+						{
+							if (pkBeliefInfo->GetYieldFromSpread(iI) > 0 || pkBeliefInfo->GetYieldFromForeignSpread(iI) > 0 || pkBeliefInfo->GetYieldChangePerXForeignFollowers(iI) > 0)
 							{
 								bReligionSpreadFocus = true;
 								break;
-							}
-							for (iI = 0; iI < NUM_YIELD_TYPES; iI++)
-							{
-								if (pkBeliefInfo->GetYieldFromSpread(iI) > 0 || pkBeliefInfo->GetYieldFromForeignSpread(iI) > 0 || pkBeliefInfo->GetYieldChangePerXForeignFollowers(iI) > 0)
-								{
-									bReligionSpreadFocus = true;
-									break;
-								}
 							}
 						}
 					}
@@ -9351,7 +9350,7 @@ int CvReligionAI::ScoreBeliefForPlayer(CvBeliefEntry* pEntry, ReligionTypes eFor
 		}
 		if (pEntry->GetCombatModifierEnemyCities() > 0)
 		{
-			iWarTemp += iOffensePriority * iNumUnits * pEntry->GetCombatModifierEnemyCities() / 5;
+			iWarTemp += iOffensePriority * iNumUnits * pEntry->GetCombatModifierEnemyCities() / 10;
 		}
 		if (pEntry->GetCombatVersusOtherReligionTheirLands() > 0)
 		{
@@ -9455,8 +9454,7 @@ int CvReligionAI::ScoreBeliefForPlayer(CvBeliefEntry* pEntry, ReligionTypes eFor
 	if (pEntry->GetHappinessPerPantheon() > 0)
 	{
 		int iPantheon = GC.getGame().GetGameReligions()->GetNumPantheonsCreated();
-		// are we founding a pantheon?
-		if (eForeignReligion == NO_RELIGION && eReligion == NO_RELIGION && pEntry->IsPantheonBelief())
+		if (bFoundingPantheon)
 			iPantheon++;
 
 		if (iPantheon > 8)
@@ -9477,7 +9475,7 @@ int CvReligionAI::ScoreBeliefForPlayer(CvBeliefEntry* pEntry, ReligionTypes eFor
 	int iPassiveSpreadTemp = 0;
 	int iActiveSpreadTemp = 0;
 
-	if (eForeignReligion == NO_RELIGION && eReligion != NO_RELIGION)
+	if (eForeignReligion == NO_RELIGION)
 	{
 		if (!bNoNaturalSpread)
 		{
@@ -9517,6 +9515,16 @@ int CvReligionAI::ScoreBeliefForPlayer(CvBeliefEntry* pEntry, ReligionTypes eFor
 				}
 			}
 
+			if (pEntry->GetSpyPressure() > 0 && !GC.getGame().isOption(GAMEOPTION_NO_ESPIONAGE))
+			{
+				iPassiveSpreadTemp += pEntry->GetSpyPressure() * 10 * max(1, min(3, m_pPlayer->GetEspionage()->GetNumSpies()));
+			}
+
+			if (pEntry->GetInquisitorPressureRetention() > 0)
+			{
+				iPassiveSpreadTemp += pEntry->GetInquisitorPressureRetention() * min(4, iEnemyReligionsNearby);
+			}
+
 			// passive spread is good if we can't build missionaries
 			if (bNoMissionary)
 				iPassiveSpreadTemp *= 2;
@@ -9548,7 +9556,7 @@ int CvReligionAI::ScoreBeliefForPlayer(CvBeliefEntry* pEntry, ReligionTypes eFor
 			}
 			if (pEntry->GetOtherReligionPressureErosion() > 0)
 			{
-				iActiveSpreadTemp += iNumNearbyCitiesToSpreadTo * iEnemyReligionsNearby * pEntry->GetOtherReligionPressureErosion() / 5;
+				iActiveSpreadTemp += iNumNearbyCitiesToSpreadTo * iEnemyReligionsNearby * pEntry->GetOtherReligionPressureErosion() / 25;
 			}
 
 			// extra missionary strength?
@@ -9588,7 +9596,7 @@ int CvReligionAI::ScoreBeliefForPlayer(CvBeliefEntry* pEntry, ReligionTypes eFor
 	///////////////////////
 
 	int iForeignCityYields = 0;
-	if (eForeignReligion == NO_RELIGION && eReligion != NO_RELIGION)
+	if (eForeignReligion == NO_RELIGION)
 	{
 		int iNumForeignCitiesToSpreadTo = iNumNearbyCitiesToSpreadTo - (m_pPlayer->getNumCities() - iNumOurCitiesWithReligion);
 		int iAvailability = bReligionSpreadFocus ? 5 : 3; // todo: evaluate general strength of the religion compared to the competitors
@@ -9603,10 +9611,23 @@ int CvReligionAI::ScoreBeliefForPlayer(CvBeliefEntry* pEntry, ReligionTypes eFor
 				iForeignCityYields += (10 * m_pPlayer->GetReligions()->GetNumForeignFollowers(false, eReligion) + 5 * iAvailability * iNumForeignCitiesToSpreadTo) * ScoreYieldForReligionTimes100((YieldTypes)iI) / 100 / pEntry->GetYieldChangePerXForeignFollowers(iI);
 			}
 		}
+
+		// score only foreign cities here
 		if (pEntry->GetGoldPerXFollowers() > 0)
 		{
-			// score only foreign cities here
 			iForeignCityYields += (10 * m_pPlayer->GetReligions()->GetNumForeignFollowers(false, eReligion) + 5 * iAvailability * iNumForeignCitiesToSpreadTo) * ScoreYieldForReligionTimes100(YIELD_GOLD) / 100 / pEntry->GetGoldPerXFollowers();
+		}
+		if (pEntry->GetGoldPerFollowingCity() > 0)
+		{
+			iForeignCityYields += (10 * m_pPlayer->GetReligions()->GetNumForeignCitiesFollowing(eReligion) + iAvailability * iNumForeignCitiesToSpreadTo) * pEntry->GetGoldPerFollowingCity() * ScoreYieldForReligionTimes100(YIELD_GOLD) / 100;
+		}
+		if (pEntry->GetHappinessPerFollowingCity() > 0)
+		{
+			iForeignCityYields += (int)(pEntry->GetHappinessPerFollowingCity() * (10 * m_pPlayer->GetReligions()->GetNumForeignCitiesFollowing(eReligion) + iAvailability * iNumForeignCitiesToSpreadTo) * iHappinessValue);
+		}
+		if (pEntry->GetHappinessPerXPeacefulForeignFollowers() > 0 && !bIsWarmonger)
+		{
+			iForeignCityYields += (10 * m_pPlayer->GetReligions()->GetNumForeignFollowers(false, eReligion) + 5 * iAvailability * iNumForeignCitiesToSpreadTo) * iHappinessValue / pEntry->GetHappinessPerXPeacefulForeignFollowers() / max(iNeighborWarmongerThreat / 2, 1);
 		}
 	}
 	iRtnValue += iForeignCityYields;
@@ -9659,6 +9680,9 @@ int CvReligionAI::ScoreBeliefForPlayer(CvBeliefEntry* pEntry, ReligionTypes eFor
 			if (eBuilding != NO_BUILDING)
 			{
 				CvBuildingEntry* pBuildingEntry = GC.getBuildingInfo(eBuilding);
+
+				int iBuildingValueTimes100 = 0;
+
 				int iCityAvailabilitySum = 0;
 				int iLoop = 0;
 				CvCity* pLoopCity = NULL;
@@ -9673,41 +9697,62 @@ int CvReligionAI::ScoreBeliefForPlayer(CvBeliefEntry* pEntry, ReligionTypes eFor
 					if (pLoopCity->IsRazing())
 						continue;
 
-					if ((m_pPlayer->GetReligions()->IsFoundingReligion() && pLoopCity->isCapital()) || (eReligion != NO_RELIGION && pLoopCity->GetCityReligions()->GetReligiousMajority() == eReligion))
-						iCityAvailabilitySum += 10;
+					int iCityAvailability = 0;
+					if ((bFoundingReligion && pLoopCity->isCapital()) || (eReligion != NO_RELIGION && pLoopCity->GetCityReligions()->GetReligiousMajority() == eReligion))
+						iCityAvailability = 10;
 					else
 					{
 						// need to spread our religion to it first
-						iCityAvailabilitySum += 6;
+						iCityAvailability = 6;
+					}
+					// if we don't earn much faith, it would take much longer to buy buildings
+					int iFaithCollectTurns = m_pPlayer->getCapitalCity()->GetFaithPurchaseCost(eBuilding, false) / max(m_pPlayer->GetTotalFaithPerTurnTimes100() / 100, 1);
+					iCityAvailability *= max(0, 100 - (int)pow((double)iFaithCollectTurns, 1.15));
+					iCityAvailability /= 100;
+
+					iCityAvailabilitySum += iCityAvailability;  
+
+					for (iI = 0; iI < NUM_YIELD_TYPES; iI++)
+					{
+						YieldTypes eYield = (YieldTypes)iI;
+						for (int iJ = 0; iJ < GC.getNumResourceInfos(); iJ++)
+						{
+							ResourceTypes eResource = (ResourceTypes)iJ;
+							if (pBuildingEntry->GetResourceYieldChange(eResource, eYield) > 0)
+							{
+								iBuildingValueTimes100 += (iCityAvailability * pLoopCity->GetNumResourceLocal(eResource, true) + iCityAvailability * pLoopCity->GetNumResourceLocal(eResource, false) / 2) * pBuildingEntry->GetResourceYieldChange(eResource, eYield) * ScoreYieldForReligionTimes100(eYield);
+							}
+						}
 					}
 				}
 
-				int iBuildingValueTimes100 = 0;
+				// add in effects that apply to all cities
+
 				// faith cost
-				iBuildingValueTimes100 -= pBuildingEntry->GetFaithCost() * ScoreYieldForReligionTimes100(YIELD_FAITH) / 5;
+				if (pBuildingEntry->IsFaithPurchaseOnly())
+				{
+					iBuildingValueTimes100 -= iCityAvailabilitySum * m_pPlayer->getCapitalCity()->GetFaithPurchaseCost(eBuilding, true) * ScoreYieldForReligionTimes100(YIELD_FAITH) / 100;
+				}
+				else
+				{
+					// we could also use production to build this. compare the value of the faith we'd have to spend and the value of the production. don't reduce the value of the belief if the difference is negative 
+					iBuildingValueTimes100 += iCityAvailabilitySum * max(0, (m_pPlayer->getProductionNeeded(eBuilding, true) * ScoreYieldForReligionTimes100(YIELD_PRODUCTION) - m_pPlayer->getCapitalCity()->GetFaithPurchaseCost(eBuilding, true) * ScoreYieldForReligionTimes100(YIELD_FAITH))) / 100;
+				}
 
 				if (pBuildingEntry->GetHappiness() > 0)
 				{
-					iBuildingValueTimes100 += pBuildingEntry->GetHappiness() * iHappinessValue;
+					iBuildingValueTimes100 += iCityAvailabilitySum * pBuildingEntry->GetHappiness() * iHappinessValue * 100;
 				}
 				if (pBuildingEntry->GetGreatWorkCount() > 0)
 				{
-					iBuildingValueTimes100 += pBuildingEntry->GetGreatWorkCount() * (pDiploAI->IsGoingForCultureVictory() ? 200 : 0);
+					iBuildingValueTimes100 += iCityAvailabilitySum * pBuildingEntry->GetGreatWorkCount() * (pDiploAI->IsGoingForCultureVictory() ? 200 : 0);
 				}
 				for (iI = 0; iI < NUM_YIELD_TYPES; iI++)
 				{
 					YieldTypes eYield = (YieldTypes)iI;
 					if (pBuildingEntry->GetYieldChange(iI) > 0)
 					{
-						iBuildingValueTimes100 += pBuildingEntry->GetYieldChange(iI) * ScoreYieldForReligionTimes100(eYield) / 1;
-					}
-					for (int iJ = 0; iJ < GC.getNumResourceInfos(); iJ++)
-					{
-						ResourceTypes eResource = (ResourceTypes)iJ;
-						if (pBuildingEntry->GetResourceYieldChange(eResource, eYield) > 0)
-						{
-							iBuildingValueTimes100 += (m_pPlayer->getNumResourceFromTiles(eResource) + m_pPlayer->getNumResourceUnimproved(eResource)) * pBuildingEntry->GetResourceYieldChange(eResource, eYield) * ScoreYieldForReligionTimes100(eYield);
-						}
+						iBuildingValueTimes100 += iCityAvailabilitySum * pBuildingEntry->GetYieldChange(iI) * ScoreYieldForReligionTimes100(eYield);
 					}
 				}
 
@@ -9718,18 +9763,13 @@ int CvReligionAI::ScoreBeliefForPlayer(CvBeliefEntry* pEntry, ReligionTypes eFor
 					CvBeliefEntry* pkBeliefInfo = GC.getBeliefInfo((BeliefTypes)*it);
 					if (pkBeliefInfo)
 					{
-						// Unlocks units?
-						for (int i = (int)m_pPlayer->GetCurrentEra(); i < GC.getNumEraInfos(); i++)
-						{
-							iFaithBuildingTourism += pEntry->GetFaithBuildingTourism();
-						}
+						iFaithBuildingTourism += pkBeliefInfo->GetFaithBuildingTourism();
 					}
 				}
-				iBuildingValueTimes100 += iFaithBuildingTourism * ScoreYieldForReligionTimes100(YIELD_TOURISM);
+				iBuildingValueTimes100 += iCityAvailabilitySum * iFaithBuildingTourism * ScoreYieldForReligionTimes100(YIELD_TOURISM);
 
-				// final evaluations
-				iBuildingValueTimes100 *= iCityAvailabilitySum;
-
+				// modifiers
+				
 				// do we have the techs to build the building?
 				std::vector<int> vPrereqTechs;
 				if (pBuildingEntry->GetPrereqAndTech() != NO_TECH)
@@ -9753,7 +9793,7 @@ int CvReligionAI::ScoreBeliefForPlayer(CvBeliefEntry* pEntry, ReligionTypes eFor
 				}
 
 				// greatly reduce the value if we can also use production to build the building
-				if (pBuildingEntry->GetProductionCost() > -1)
+				if (!pBuildingEntry->IsFaithPurchaseOnly())
 				{
 					iBuildingValueTimes100 /= 10;
 				}
@@ -9767,48 +9807,71 @@ int CvReligionAI::ScoreBeliefForPlayer(CvBeliefEntry* pEntry, ReligionTypes eFor
 	// sacred sites
 	if (pEntry->GetFaithBuildingTourism() > 0)
 	{
-		// how many buildings can we buy with faith?
-		int iNumBuyableFaithBuildings = 0;
+		// how many buildings do we have or can we buy with faith?
+		// tourism is a long-term goal, don't reduce the score for buildings that we can purchase but haven't purchased yet
+		int iNumFaithBuildings = 0;
 		for (int iK = 0; iK < GC.getNumBuildingClassInfos(); iK++)
 		{
-			if (pEntry->IsBuildingClassEnabled(iK))
+			BuildingTypes eBuilding = (BuildingTypes)m_pPlayer->getCivilizationInfo().getCivilizationBuildings(iK);
+			if (eBuilding != NO_BUILDING)
 			{
-				BuildingTypes eBuilding = (BuildingTypes)m_pPlayer->getCivilizationInfo().getCivilizationBuildings(iK);
-				if (eBuilding != NO_BUILDING)
+				CvBuildingEntry* pBuildingEntry = GC.getBuildingInfo(eBuilding);
+				if (pBuildingEntry->IsFaithPurchaseOnly())
 				{
-					CvBuildingEntry* pBuildingEntry = GC.getBuildingInfo(eBuilding);
-					if (pBuildingEntry->IsFaithPurchaseOnly())
+					for (BeliefList::iterator it = vExistingBeliefs.begin(); it != vExistingBeliefs.end(); ++it)
 					{
-						for (BeliefList::iterator it = vExistingBeliefs.begin(); it != vExistingBeliefs.end(); ++it)
-						{
 
-							CvBeliefEntry* pkBeliefInfo = GC.getBeliefInfo((BeliefTypes)*it);
-							if (pkBeliefInfo && pkBeliefInfo->IsBuildingClassEnabled(iK))
-							{
-								iNumBuyableFaithBuildings++;
-							}
+						CvBeliefEntry* pkBeliefInfo = GC.getBeliefInfo((BeliefTypes)*it);
+						if (pkBeliefInfo && pkBeliefInfo->IsBuildingClassEnabled(iK))
+						{
+							iNumFaithBuildings++;
+							break;
 						}
 					}
 				}
 			}
 		}
-		int iCityAvailabilitySum = 0;
-		int iLoop = 0;
-		CvCity* pLoopCity = NULL;
-		for (pLoopCity = m_pPlayer->firstCity(&iLoop); pLoopCity != NULL; pLoopCity = m_pPlayer->nextCity(&iLoop))
-		{
-			if (pLoopCity->IsPuppet() && !MOD_GLOBAL_PURCHASE_FAITH_BUILDINGS_IN_PUPPETS)
-				continue;
-
-			if (pLoopCity->IsRazing())
-				continue;
-
-			iCityAvailabilitySum += 10 * pLoopCity->GetCityBuildings()->GetNumBuildingsFromFaith() + 4 * max(0, iNumBuyableFaithBuildings - pLoopCity->GetCityBuildings()->GetNumBuildingsFromFaith());
-		}
-		iBuildingTemp += iCityAvailabilitySum * pEntry->GetFaithBuildingTourism() * ScoreYieldForReligionTimes100(YIELD_TOURISM) / 100;
+		
+		iBuildingTemp += 10 * (m_pPlayer->getNumCities() - m_pPlayer->GetNumPuppetCities()) * iNumFaithBuildings * pEntry->GetFaithBuildingTourism() * ScoreYieldForReligionTimes100(YIELD_TOURISM) / 100;
 	}
 
 	iRtnValue += iBuildingTemp;
+
+	//////////////////
+	//Great persons
+	///////////////////////
+	
+	int iGreatPersons = 0;
+	if (pEntry->FaithPurchaseAllGreatPeople())
+	{
+		int iValue = 400;
+		// faith cost mod
+		iValue *= 100;
+		iValue /= (100 + pEntry->GetGreatPeopleFaithCostMod());
+
+		if (bReligionGPFocus)
+			iValue *= 2;
+		else if (bReligionBuyUnitsFocus)
+		{
+			iValue *= 3;
+			iValue /= 2;
+		}
+		if (bIsCulture)
+		{
+			iValue *= 3;
+			iValue /= 2;
+		}
+		iGreatPersons += iValue;
+	}
+
+
+	if (pEntry->GetGreatPersonExpendedFaith() > 0)
+	{
+		iGreatPersons += 10 * (bIsCulture ? 2 : 1) * pEntry->GetGreatPersonExpendedFaith() * ScoreYieldForReligionTimes100(YIELD_FAITH) / 5000;
+	}
+
+
+	iRtnValue += iGreatPersons;
 
 	//////////////////
 	//Misc player bonuses.
@@ -9849,14 +9912,8 @@ int CvReligionAI::ScoreBeliefForPlayer(CvBeliefEntry* pEntry, ReligionTypes eFor
 		}
 		if (pEntry->GetGreatWorkYieldChange(iI) > 0)
 		{
-			iMisc += (10 * m_pPlayer->GetCulture()->GetNumGreatWorks() + (bIsTall ? 3 : 1)) * pEntry->GetGreatWorkYieldChange(iI) * ScoreYieldForReligionTimes100((YieldTypes)iI) / 100;
+			iMisc += (10 * m_pPlayer->GetCulture()->GetNumGreatWorks() + (bIsCulture ? 3 : 1)) * pEntry->GetGreatWorkYieldChange(iI) * ScoreYieldForReligionTimes100((YieldTypes)iI) / 100;
 		}
-	}
-
-
-	if (pEntry->GetGreatPersonExpendedFaith() > 0)
-	{
-		iMisc += 10 * (bIsTall ? 2 : 1) * pEntry->GetGreatPersonExpendedFaith() * ScoreYieldForReligionTimes100(YIELD_FAITH) / 5000;
 	}
 
 	if (pEntry->GetPlotCultureCostModifier() < 0)
@@ -9872,7 +9929,7 @@ int CvReligionAI::ScoreBeliefForPlayer(CvBeliefEntry* pEntry, ReligionTypes eFor
 			{
 				// this bonus is good also if we don't have any neighbors, as internal TRs give bonuses too (and even in two cities at once). it's only bad if we're surrounded by warmongers as they might plunder our TRs
 				iTemp = max(0, 6 - iNeighborWarmongerThreat) * pEntry->GetYieldPerActiveTR(YieldTypes(iI)) * ScoreYieldForReligionTimes100(YieldTypes(iI)) / 100;
-				if (bIsTall || pPlayerTraits->IsDiplomat())
+				if (bIsCulture || pPlayerTraits->IsDiplomat())
 				{
 					iTemp *= 3;
 					iTemp /= 2;
@@ -9908,7 +9965,7 @@ int CvReligionAI::ScoreBeliefForPlayer(CvBeliefEntry* pEntry, ReligionTypes eFor
 		strBaseString += playerName + ", ";
 
 		strDesc = GetLocalizedText(pEntry->getShortDescription());
-		strTemp.Format("Player Score for Belief %s: %d. War: %d, Defense: %d, Happiness: %d, Passive Spread: %d, Active Spread: %d, Buildings: %d, Diplo: %d, Misc: %d", strDesc.GetCString(), iRtnValue, iWarTemp, iDefenseTemp, iHappinessTemp, iPassiveSpreadTemp, iActiveSpreadTemp, iBuildingTemp, iDiploTemp, iMisc);
+		strTemp.Format("Player Score for Belief %s: %d. War: %d, Defense: %d, Happiness: %d, Foreign Cities: %d, Passive Spread: %d, Active Spread: %d, Buildings: %d, Diplo: %d, Great Personss: %d, Misc: %d", strDesc.GetCString(), iRtnValue, iWarTemp, iDefenseTemp, iHappinessTemp, iForeignCityYields, iPassiveSpreadTemp, iActiveSpreadTemp, iBuildingTemp, iDiploTemp, iGreatPersons, iMisc);
 		strOutBuf = strBaseString + strTemp;
 		pLog->Msg(strOutBuf);
 	}

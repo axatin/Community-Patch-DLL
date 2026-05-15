@@ -15176,7 +15176,7 @@ int CvPlayer::getProductionNeeded(UnitTypes eUnit, bool bIgnoreDifficulty) const
 	return std::max(1, iProductionNeeded);
 }
 
-int CvPlayer::getProductionNeeded(BuildingTypes eTheBuilding) const
+int CvPlayer::getProductionNeeded(BuildingTypes eTheBuilding, bool bIgnoreGameSpeed) const
 {
 	CvBuildingEntry* pkBuildingInfo = GC.getBuildingInfo(eTheBuilding);
 	if (pkBuildingInfo == NULL)
@@ -15245,11 +15245,14 @@ int CvPlayer::getProductionNeeded(BuildingTypes eTheBuilding) const
 	iProductionNeeded *= /*100*/ GD_INT_GET(BUILDING_PRODUCTION_PERCENT);
 	iProductionNeeded /= 100;
 
-	iProductionNeeded *= GC.getGame().getGameSpeedInfo().getConstructPercent();
-	iProductionNeeded /= 100;
+	if (!bIgnoreGameSpeed)
+	{
+		iProductionNeeded *= GC.getGame().getGameSpeedInfo().getConstructPercent();
+		iProductionNeeded /= 100;
 
-	iProductionNeeded *= GC.getGame().getStartEraInfo().getConstructPercent();
-	iProductionNeeded /= 100;
+		iProductionNeeded *= GC.getGame().getStartEraInfo().getConstructPercent();
+		iProductionNeeded /= 100;
+	}
 
 	// Reduce the cost of buildings from earlier eras
 	if (MOD_BALANCE_VP)

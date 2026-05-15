@@ -12132,7 +12132,7 @@ int CvCity::GetPurchaseCost(BuildingTypes eBuilding)
 }
 
 //	--------------------------------------------------------------------------------
-int CvCity::GetFaithPurchaseCost(BuildingTypes eBuilding)
+int CvCity::GetFaithPurchaseCost(BuildingTypes eBuilding, bool bIgnoreGameSpeed)
 {
 	CvBuildingEntry* pkBuildingInfo = GC.getBuildingInfo(eBuilding);
 	if (pkBuildingInfo == NULL)
@@ -12155,9 +12155,12 @@ int CvCity::GetFaithPurchaseCost(BuildingTypes eBuilding)
 	iMultiplier = (100 + GET_PLAYER(getOwner()).GetPlayerPolicies()->GetNumericModifier(POLICYMOD_FAITH_COST_MODIFIER));
 	iCost = iCost * iMultiplier / 100;
 
-	// Adjust for game speed
-	iCost *= GC.getGame().getGameSpeedInfo().getConstructPercent();
-	iCost /= 100;
+	if (!bIgnoreGameSpeed)
+	{
+		// Adjust for game speed
+		iCost *= GC.getGame().getGameSpeedInfo().getConstructPercent();
+		iCost /= 100;
+	}
 
 	// Adjust for difficulty
 	if (!isBarbarian())

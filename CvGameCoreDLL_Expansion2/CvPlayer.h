@@ -330,7 +330,7 @@ public:
 	bool isProductionMaxedBuilding(BuildingTypes eBuilding, bool bAcquireCity = false) const;
 	bool isProductionMaxedProject(ProjectTypes eProject) const;
 	int getProductionNeeded(UnitTypes eUnit, bool bIgnoreDifficulty) const;
-	int getProductionNeeded(BuildingTypes eBuilding) const;
+	int getProductionNeeded(BuildingTypes eBuilding, bool bIgnoreGameSpeed = false) const;
 	int getProductionNeeded(ProjectTypes eProject) const;
 
 	int getMaxStockpile() const;

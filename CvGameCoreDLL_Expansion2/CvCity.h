@@ -440,7 +440,7 @@ public:
 	int GetPurchaseCost(UnitTypes eUnit);
 	int GetFaithPurchaseCost(UnitTypes eUnit, bool bIncludeBeliefDiscounts);
 	int GetPurchaseCost(BuildingTypes eBuilding);
-	int GetFaithPurchaseCost(BuildingTypes eBuilding);
+	int GetFaithPurchaseCost(BuildingTypes eBuilding, bool bIgnoreGameSpeed = false);
 	int GetPurchaseCost(ProjectTypes eProject);
 	int GetPurchaseCostFromProduction(int iProduction);
 
