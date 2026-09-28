@@ -573,7 +573,7 @@ public:
 	int getYield(YieldTypes eIndex) const;
     void changeYield(YieldTypes eYield, int iChange);
 
-	int calculateNatureYield(YieldTypes eYield, PlayerTypes ePlayer, FeatureTypes eFeature, ResourceTypes eResource, ImprovementTypes eImprovement, const CvCity* pOwningCity, bool bDisplay = false) const;
+	int calculateNatureYield(YieldTypes eYield, PlayerTypes ePlayer, FeatureTypes eFeature, ResourceTypes eResource, ImprovementTypes eImprovement, const CvCity* pOwningCity, bool bDisplay = false, bool bAssumeCityHere = false) const;
 
 	int calculateBestNatureYield(YieldTypes eYield, PlayerTypes ePlayer) const;
 	int calculateTotalBestNatureYield(PlayerTypes ePlayer) const;

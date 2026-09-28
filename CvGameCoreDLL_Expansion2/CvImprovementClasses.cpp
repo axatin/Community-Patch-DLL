@@ -1851,19 +1851,21 @@ CvImprovementEntry* CvImprovementXMLEntries::GetEntry(int index)
 	return (index != NO_IMPROVEMENT) ? m_paImprovementEntries[index] : NULL;
 }
 
-/// Tell which improvement unlocks a resource
-CvImprovementEntry* CvImprovementXMLEntries::GetImprovementForResource(int eResource)
+/// Tell which improvements unlock a resource
+std::vector<CvImprovementEntry*> CvImprovementXMLEntries::GetImprovementsForResource(int eResource)
 {
+	std::vector<CvImprovementEntry*> vImprovements;
+
 	for(unsigned int iImprovement = 0; iImprovement < m_paImprovementEntries.size(); ++iImprovement)
 	{
 		CvImprovementEntry* pImprovement = GetEntry((ImprovementTypes)iImprovement);
 		if(pImprovement && pImprovement->IsImprovementResourceMakesValid(eResource))
 		{
-			return pImprovement;
+			vImprovements.push_back(pImprovement);
 		}
 	}
 
-	return NULL;
+	return vImprovements;
 }
 
 /// Clear improvement entries

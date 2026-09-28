@@ -30,7 +30,7 @@ CvCitySiteEvaluator::~CvCitySiteEvaluator(void)
 CvCitySiteEvaluator::CvCitySiteEvaluator()
 {
 	// Set up city ring multipliers
-	m_iRingModifier[0] = 1;   // Items under city get handled separately
+	m_iRingModifier[0] = /*6*/ GD_INT_GET(CITY_RING_1_MULTIPLIER);
 	m_iRingModifier[1] = /*6*/ GD_INT_GET(CITY_RING_1_MULTIPLIER);
 	m_iRingModifier[2] = /*6*/ GD_INT_GET(CITY_RING_2_MULTIPLIER);
 	m_iRingModifier[3] = /*3*/ GD_INT_GET(CITY_RING_3_MULTIPLIER);
@@ -437,11 +437,12 @@ int CvSiteEvaluatorForSettler::PlotFoundValue(CvPlot* pPlot, const CvPlayer* pPl
 		int iPlotValue = iDefaultPlotValue;
 		if (iRingModifier>0)
 		{
-			int iFoodValue = ComputeFoodValue(pLoopPlot, pPlayer) * /*12*/ GD_INT_GET(SETTLER_FOOD_MULTIPLIER);
-			int iProductionValue = ComputeProductionValue(pLoopPlot, pPlayer) * /*8*/ GD_INT_GET(SETTLER_PRODUCTION_MULTIPLIER);
-			int	iGoldValue = ComputeGoldValue(pLoopPlot, pPlayer) * /*8*/ GD_INT_GET(SETTLER_GOLD_MULTIPLIER);
-			int iScienceValue = ComputeScienceValue(pLoopPlot, pPlayer) * /*5*/ GD_INT_GET(SETTLER_SCIENCE_MULTIPLIER);
-			int	iFaithValue = ComputeFaithValue(pLoopPlot, pPlayer) * /*4*/ GD_INT_GET(SETTLER_FAITH_MULTIPLIER);
+			int iFoodValue = ComputeYieldValue(pLoopPlot, YIELD_FOOD, pPlayer, iDistance) * /*12*/ GD_INT_GET(SETTLER_FOOD_MULTIPLIER);
+			int iProductionValue = ComputeYieldValue(pLoopPlot, YIELD_PRODUCTION, pPlayer, iDistance) * /*8*/ GD_INT_GET(SETTLER_PRODUCTION_MULTIPLIER);
+			int	iGoldValue = ComputeYieldValue(pLoopPlot, YIELD_GOLD, pPlayer, iDistance) * /*8*/ GD_INT_GET(SETTLER_GOLD_MULTIPLIER);
+			int iScienceValue = ComputeYieldValue(pLoopPlot, YIELD_SCIENCE, pPlayer, iDistance) * /*5*/ GD_INT_GET(SETTLER_SCIENCE_MULTIPLIER);
+			int iCultureValue = ComputeYieldValue(pLoopPlot, YIELD_CULTURE, pPlayer, iDistance) * /*5*/ GD_INT_GET(SETTLER_CULTURE_MULTIPLIER);
+			int	iFaithValue = ComputeYieldValue(pLoopPlot, YIELD_FAITH, pPlayer, iDistance) * /*4*/ GD_INT_GET(SETTLER_FAITH_MULTIPLIER);
 			//this is about strategic placement, not resources
 			int iStrategicValue = ComputeStrategicValue(pLoopPlot, iDistance) * /*3*/ GD_INT_GET(SETTLER_STRATEGIC_MULTIPLIER);
 
@@ -463,8 +464,7 @@ int CvSiteEvaluatorForSettler::PlotFoundValue(CvPlot* pPlot, const CvPlayer* pPl
 			iTotalFoodValue += iFoodValue;
 			iTotalProductionValue += iProductionValue;
 
-			//it's a bit awkward, happiness and trade value should have a higher modifier in ring 0 ...
-			iPlotValue += iRingModifier * ( iFoodValue + iProductionValue + iGoldValue + iScienceValue + iFaithValue + iTradeValue + iHappinessValue ) + iStrategicValue;
+			iPlotValue += iRingModifier * ( iFoodValue + iProductionValue + iGoldValue + iScienceValue + iCultureValue + iFaithValue + iTradeValue + iHappinessValue ) + iStrategicValue;
 
 			// need at least some food close by
 			if (iDistance > 0 && iDistance < 3)
@@ -613,13 +613,13 @@ int CvSiteEvaluatorForSettler::PlotFoundValue(CvPlot* pPlot, const CvPlayer* pPl
 		if (pPlayer->GetPlayerTraits()->IsFaithFromUnimprovedForest())
 		{
 			iCivModifier += iCelticForestCount * m_iCelticMultiplier;
-			if (pDebug)
+			if (pDebug && iCelticForestCount > 0)
 				vQualifiersPositive.push_back("(C) forest");
 		}
 		else if (pPlayer->GetPlayerTraits()->GetNaturalWonderYieldModifier() > 0)
 		{
 			iCivModifier += iNaturalWonderCount * m_iSpainMultiplier;
-			if (pDebug)
+			if (pDebug && iNaturalWonderCount > 0)
 				vQualifiersPositive.push_back("(C) natural wonders");
 		}
 
@@ -628,7 +628,7 @@ int CvSiteEvaluatorForSettler::PlotFoundValue(CvPlot* pPlot, const CvPlayer* pPl
 		{
 			ImprovementTypes eImprovement = (ImprovementTypes)iImprovementLoop;
 			CvImprovementEntry* pkEntry = GC.getImprovementInfo(eImprovement);
-			if (pkEntry->IsSpecificCivRequired())
+			if (pkEntry->IsSpecificCivRequired() && !pkEntry->IsCreatedByGreatPerson())
 			{
 				CivilizationTypes eCiv = pkEntry->GetRequiredCivilization();
 				if (eCiv == pPlayer->getCivilizationType())
@@ -637,49 +637,49 @@ int CvSiteEvaluatorForSettler::PlotFoundValue(CvPlot* pPlot, const CvPlayer* pPl
 					if (pkEntry->GetFeatureMakesValid(FEATURE_JUNGLE))
 					{
 						iCivModifier += iJungleCount * m_iBrazilMultiplier;
-						if (pDebug) vQualifiersPositive.push_back("(C) jungle");
+						if (pDebug && iJungleCount > 0) vQualifiersPositive.push_back("(C) jungle");
 					}
 					else if (pkEntry->GetFeatureMakesValid(FEATURE_FOREST))
 					{
 						iCivModifier += iForestCount * m_iBrazilMultiplier;
-						if (pDebug) vQualifiersPositive.push_back("(C) forest");
+						if (pDebug && iForestCount > 0) vQualifiersPositive.push_back("(C) forest");
 					}
 
 					if (pkEntry->GetTerrainMakesValid(TERRAIN_DESERT))
 					{
 						iCivModifier += iDesertCount * m_iMorrocoMultiplier;
-						if (pDebug) vQualifiersPositive.push_back("(C) desert");
+						if (pDebug && iDesertCount > 0) vQualifiersPositive.push_back("(C) desert");
 					}
 
 					if (pkEntry->IsAdjacentLuxury())
 					{
 							iCivModifier += iResourceLuxuryCount * m_iFranceMultiplier;
-							if (pDebug) vQualifiersPositive.push_back("(C) luxury");
+							if (pDebug && iResourceLuxuryCount > 0) vQualifiersPositive.push_back("(C) luxury");
 					}
 			
 					if (pkEntry->GetFeatureMakesValid(FEATURE_MARSH))
 					{
 						iCivModifier += iWetlandsCount * m_iNetherlandsMultiplier;
-						if (pDebug) vQualifiersPositive.push_back("(C) wetlands");
+						if (pDebug && iWetlandsCount > 0) vQualifiersPositive.push_back("(C) wetlands");
 					}
 					//Custom code for vanilla Netherlands
 					else if (!MOD_BALANCE_VP && pkEntry->IsFreshWaterMakesValid())
 					{
 						iCivModifier += iWetlandsCount * m_iNetherlandsMultiplier;
 						iCivModifier += iFloodPlainsCount * m_iNetherlandsMultiplier;
-						if (pDebug) vQualifiersPositive.push_back("(C) wetlands");
+						if (pDebug && (iWetlandsCount > 0 || iFloodPlainsCount > 0)) vQualifiersPositive.push_back("(C) wetlands");
 					}
 					
 					if (pkEntry->IsAdjacentLake())
 					{
 						iCivModifier += (iLakeCount * m_iNetherlandsMultiplier);
-						if (pDebug) vQualifiersPositive.push_back("(C) lake adjacent");
+						if (pDebug && iLakeCount > 0) vQualifiersPositive.push_back("(C) lake adjacent");
 					}
 				
 					if (pkEntry->IsMountainsMakesValid())
 					{
 						iCivModifier += (iMountainsCount * m_iMountainMultiplier);
-						if (pDebug) vQualifiersPositive.push_back("(C) mountains");
+						if (pDebug && iMountainsCount > 0) vQualifiersPositive.push_back("(C) mountains");
 					}
 				}
 			}
@@ -897,15 +897,27 @@ int CvSiteEvaluatorForSettler::PlotFoundValue(CvPlot* pPlot, const CvPlayer* pPl
 	//logging logging logging
 	if (pDebug)
 	{
-		pDebug->Format("%d,%d,%d,%d", iTotalPlotValue, iValueModifier, iStratModifier, iCivModifier);
+		pDebug->Format("(Plot %d, Mod %d, Strat %d, Civ %d)", iTotalPlotValue, iValueModifier, iStratModifier, iCivModifier);
+		if (vQualifiersPositive.size() > 0)
+		{
+			pDebug->append(", Positive: ");
+		}
 		for (size_t i=0; i<vQualifiersPositive.size();i++)
 		{
-			pDebug->append(",positive: ");
+			if (i>0)
+				pDebug->append(", ");
+
 			pDebug->append(vQualifiersPositive[i].c_str());
+		}
+		if (vQualifiersNegative.size() > 0)
+		{
+			pDebug->append(", Negative: ");
 		}
 		for (size_t i=0; i<vQualifiersNegative.size();i++)
 		{
-			pDebug->append(",negative: ");
+			if (i > 0)
+				pDebug->append(", ");
+
 			pDebug->append(vQualifiersNegative[i].c_str());
 		}
 	}
@@ -919,10 +931,12 @@ int CvCitySiteEvaluator::PlotFertilityValue(CvPlot* pPlot, const CvPlayer* pPlay
 	int rtnValue = 0;
 	if( (!pPlot->isWater() && pPlot->isValidMovePlot(NO_PLAYER)) || (bIncludeCoast && pPlot->isShallowWater() ) )
 	{
-		rtnValue += ComputeFoodValue(pPlot, pPlayer);
-		rtnValue += ComputeProductionValue(pPlot, pPlayer);
-		rtnValue += ComputeGoldValue(pPlot, pPlayer);
-		rtnValue += ComputeScienceValue(pPlot, pPlayer);
+		rtnValue += ComputeYieldValue(pPlot, YIELD_FOOD, pPlayer);
+		rtnValue += ComputeYieldValue(pPlot, YIELD_PRODUCTION, pPlayer);
+		rtnValue += ComputeYieldValue(pPlot, YIELD_GOLD, pPlayer);
+		rtnValue += ComputeYieldValue(pPlot, YIELD_SCIENCE, pPlayer);
+		rtnValue += ComputeYieldValue(pPlot, YIELD_CULTURE, pPlayer);
+		rtnValue += ComputeYieldValue(pPlot, YIELD_FAITH, pPlayer);
 		rtnValue += ComputeTradeableResourceValue(pPlot, pPlayer);
 	}
 
@@ -950,126 +964,76 @@ vector<int> CvCitySiteEvaluator::GetAllCitySiteValues(const CvPlayer* pPlayer)
 
 // PROTECTED METHODS (can be overridden in derived classes)
 
-/// Value of plot for providing food
-int CvCitySiteEvaluator::ComputeFoodValue(CvPlot* pPlot, const CvPlayer* pPlayer)
+/// Value of plot for providing yields
+int CvCitySiteEvaluator::ComputeYieldValue(CvPlot* pPlot, YieldTypes eYield, const CvPlayer* pPlayer, int iDistance)
 {
 	TeamTypes eTeam = pPlayer ? pPlayer->getTeam() : NO_TEAM;
-	// From tile yield
-	int rtnValue = pPlot->calculateNatureYield(YIELD_FOOD, pPlayer ? pPlayer->GetID() : NO_PLAYER, pPlot->getFeatureType(), pPlot->getResourceType(eTeam), pPlot->getImprovementType(), NULL);
 
-	// assume a farm or similar on suitable terrain ... should be build sooner or later. value averages out with other improvements
-	if (((pPlot->getTerrainType()==TERRAIN_GRASS || pPlot->getTerrainType()==TERRAIN_PLAINS) && pPlot->getFeatureType() == NO_FEATURE) || pPlot->getFeatureType() == FEATURE_FLOOD_PLAINS)
-		rtnValue += 1;
+	ReligionTypes eReligion = pPlayer ? pPlayer->GetReligions()->GetStateReligion(true) : NO_RELIGION;
+	const CvReligion* pReligion = (eReligion != NO_RELIGION) ?  GC.getGame().GetGameReligions()->GetReligion(eReligion, pPlayer->GetID()) : NULL;
 
-	//Help with island settling - assume a lighthouse
-	if(pPlot->isShallowWater())
-		rtnValue += 1;
+	int iRtnValue = 0;
 
 	// From resource
 	ResourceTypes eResource = pPlot->getResourceType(eTeam);
-	if(eResource != NO_RESOURCE)
+	ImprovementTypes eBestImprovement = NO_IMPROVEMENT;
+	if (iDistance != 0)
 	{
-		//can we build an improvement on this resource? assume we will do it (natural yield is already considered)
-
-		CvImprovementEntry* pImprovement = GC.GetGameImprovements()->GetImprovementForResource(eResource);
-		if(pImprovement)
+		if (eResource != NO_RESOURCE)
 		{
-			rtnValue += pImprovement->GetImprovementResourceYield(eResource, YIELD_FOOD);
+			//can we build an improvement on this resource? assume we will do it (natural yield is already considered)
+
+			//if several improvements are possible, assume we build the one with the highest yield
+			vector<CvImprovementEntry*> vImprovements = GC.GetGameImprovements()->GetImprovementsForResource(eResource);
+			int iBestYield = 0;
+			for (vector<CvImprovementEntry*>::const_iterator it = vImprovements.begin(); it != vImprovements.end(); ++it)
+			{
+				if ((*it)->GetRequiredCivilization() != NO_CIVILIZATION && (!pPlayer || (*it)->GetRequiredCivilization() != pPlayer->getCivilizationType()))
+					continue;
+
+				int iImprovementYield = (*it)->GetImprovementResourceYield(eResource, eYield);
+				if (iImprovementYield > iBestYield)
+				{
+					iBestYield = iImprovementYield;
+					eBestImprovement = (ImprovementTypes)(*it)->GetID();
+				}
+			}
+
+			iRtnValue += iBestYield;
+		}
+
+
+		if (eBestImprovement == NO_IMPROVEMENT)
+			eBestImprovement = pPlot->getImprovementType();
+	}
+
+	iRtnValue = pPlot->calculateNatureYield(eYield, pPlayer ? pPlayer->GetID() : NO_PLAYER, pPlot->getFeatureType(), pPlot->getResourceType(eTeam), eBestImprovement, NULL, false, iDistance == 0);
+	iRtnValue += pPlot->calculateReligionNatureYield(eYield, pPlayer ? pPlayer->GetID() : NO_PLAYER, eBestImprovement, pPlot->getFeatureType(), pPlot->getResourceType(eTeam), NULL, pReligion, NULL);
+
+	if (iDistance != 0)
+	{
+		if (eYield == YIELD_FOOD)
+		{
+			// assume a farm or similar on suitable terrain ... should be build sooner or later. value averages out with other improvements
+			if (((pPlot->getTerrainType() == TERRAIN_GRASS || pPlot->getTerrainType() == TERRAIN_PLAINS) && pPlot->getFeatureType() == NO_FEATURE) || pPlot->getFeatureType() == FEATURE_FLOOD_PLAINS)
+				iRtnValue += 1;
+
+			//Help with island settling - assume a lighthouse
+			if (pPlot->isShallowWater())
+				iRtnValue += 1;
+		}
+		else if (eYield == YIELD_PRODUCTION)
+		{
+			// assume a mine or similar in friendly climate. don't run off into the snow
+			if (pPlot->isHills() && (pPlot->getTerrainType() == TERRAIN_GRASS || pPlot->getTerrainType() == TERRAIN_PLAINS || pPlot->getTerrainType() == TERRAIN_TUNDRA) && pPlot->getFeatureType() == NO_FEATURE)
+				iRtnValue += 1;
+
 		}
 	}
 
-	return rtnValue * m_iFlavorMultiplier[YIELD_FOOD];
-}
+	// todo: yields from religion
 
-/// Value of plot for providing hammers
-int CvCitySiteEvaluator::ComputeProductionValue(CvPlot* pPlot, const CvPlayer* pPlayer)
-{
-	TeamTypes eTeam = pPlayer ? pPlayer->getTeam() : NO_TEAM;
-	int rtnValue = pPlot->calculateNatureYield(YIELD_PRODUCTION, pPlayer ? pPlayer->GetID() : NO_PLAYER, pPlot->getFeatureType(), pPlot->getResourceType(eTeam), pPlot->getImprovementType(), NULL);
-
-	// assume a mine or similar in friendly climate. don't run off into the snow
-	if (pPlot->isHills() && (pPlot->getTerrainType()==TERRAIN_GRASS || pPlot->getTerrainType()==TERRAIN_PLAINS || pPlot->getTerrainType()==TERRAIN_TUNDRA) && pPlot->getFeatureType() == NO_FEATURE)
-		rtnValue += 1;
-
-	// From resource
-	ResourceTypes eResource = pPlot->getResourceType(eTeam);
-	if(eResource != NO_RESOURCE)
-	{
-		//can we build an improvement on this resource? assume we will do it (natural yield is already considered)
-		CvImprovementEntry* pImprovement = GC.GetGameImprovements()->GetImprovementForResource(eResource);
-		if(pImprovement)
-		{
-			rtnValue += pImprovement->GetImprovementResourceYield(eResource, YIELD_PRODUCTION);
-		}
-	}
-
-	return rtnValue * m_iFlavorMultiplier[YIELD_PRODUCTION];
-}
-
-/// Value of plot for providing gold
-int CvCitySiteEvaluator::ComputeGoldValue(CvPlot* pPlot, const CvPlayer* pPlayer)
-{
-	TeamTypes eTeam = pPlayer ? pPlayer->getTeam() : NO_TEAM;
-	int rtnValue = pPlot->calculateNatureYield(YIELD_GOLD, pPlayer ? pPlayer->GetID() : NO_PLAYER, pPlot->getFeatureType(), pPlot->getResourceType(eTeam), pPlot->getImprovementType(), NULL);
-
-	// From resource
-	ResourceTypes eResource = pPlot->getResourceType(eTeam);
-	if(eResource != NO_RESOURCE)
-	{
-		//can we build an improvement on this resource? assume we will do it (natural yield is already considered)
-
-		CvImprovementEntry* pImprovement = GC.GetGameImprovements()->GetImprovementForResource(eResource);
-		if(pImprovement)
-		{
-			rtnValue += pImprovement->GetImprovementResourceYield(eResource, YIELD_GOLD);
-		}
-	}
-
-	return rtnValue * m_iFlavorMultiplier[YIELD_GOLD];
-}
-
-/// Value of plot for providing science
-int CvCitySiteEvaluator::ComputeScienceValue(CvPlot* pPlot, const CvPlayer* pPlayer)
-{
-	TeamTypes eTeam = pPlayer ? pPlayer->getTeam() : NO_TEAM;
-	int rtnValue = pPlot->calculateNatureYield(YIELD_SCIENCE, pPlayer ? pPlayer->GetID() : NO_PLAYER, pPlot->getFeatureType(), pPlot->getResourceType(eTeam), pPlot->getImprovementType(), NULL);
-
-	// From resource
-	ResourceTypes eResource = pPlot->getResourceType(eTeam);
-	if(eResource != NO_RESOURCE)
-	{
-		//can we build an improvement on this resource? assume we will do it (natural yield is already considered)
-
-		CvImprovementEntry* pImprovement = GC.GetGameImprovements()->GetImprovementForResource(eResource);
-		if(pImprovement)
-		{
-			rtnValue += pImprovement->GetImprovementResourceYield(eResource, YIELD_SCIENCE);
-		}
-	}
-
-	return rtnValue * m_iFlavorMultiplier[YIELD_SCIENCE];
-}
-
-/// Vale of plot for providing faith
-int CvCitySiteEvaluator::ComputeFaithValue(CvPlot* pPlot, const CvPlayer* pPlayer)
-{
-	TeamTypes eTeam = pPlayer ? pPlayer->getTeam() : NO_TEAM;
-	int rtnValue = pPlot->calculateNatureYield(YIELD_FAITH, pPlayer ? pPlayer->GetID() : NO_PLAYER, pPlot->getFeatureType(), pPlot->getResourceType(eTeam), pPlot->getImprovementType(), NULL);
-
-	// From resource
-	ResourceTypes eResource = pPlot->getResourceType(eTeam);
-	if(eResource != NO_RESOURCE)
-	{
-		//can we build an improvement on this resource? assume we will do it (natural yield is already considered)
-
-		CvImprovementEntry* pImprovement = GC.GetGameImprovements()->GetImprovementForResource(eResource);
-		if(pImprovement)
-		{
-			rtnValue += pImprovement->GetImprovementResourceYield(eResource, YIELD_FAITH);
-		}
-	}
-
-	return rtnValue * m_iFlavorMultiplier[YIELD_FAITH];
+	return iRtnValue * m_iFlavorMultiplier[eYield];
 }
 
 /// Value of plot for providing Happiness
@@ -1277,12 +1241,13 @@ int CvCitySiteEvaluator::PlotFoundValue(CvPlot* pPlot, const CvPlayer*, const st
 			// Skip the city plot itself for now
 			if(iDistance != 0)
 			{
-				rtnValue += iRingModifier * ComputeFoodValue(pLoopPlot, NULL) * /*6*/ GD_INT_GET(START_AREA_FOOD_MULTIPLIER);
+				rtnValue += iRingModifier * ComputeYieldValue(pLoopPlot, YIELD_FOOD, NULL) * /*6*/ GD_INT_GET(START_AREA_FOOD_MULTIPLIER);
+				rtnValue += iRingModifier * ComputeYieldValue(pLoopPlot, YIELD_PRODUCTION, NULL) * /*8*/ GD_INT_GET(START_AREA_PRODUCTION_MULTIPLIER);
+				rtnValue += iRingModifier * ComputeYieldValue(pLoopPlot, YIELD_GOLD, NULL) * /*2*/ GD_INT_GET(START_AREA_GOLD_MULTIPLIER);
+				rtnValue += iRingModifier * ComputeYieldValue(pLoopPlot, YIELD_SCIENCE, NULL) * /*1*/ GD_INT_GET(START_AREA_SCIENCE_MULTIPLIER);
+				rtnValue += iRingModifier * ComputeYieldValue(pLoopPlot, YIELD_CULTURE, NULL) * /*1*/ GD_INT_GET(START_AREA_CULTURE_MULTIPLIER);
+				rtnValue += iRingModifier * ComputeYieldValue(pLoopPlot, YIELD_FAITH, NULL) * /*1*/ GD_INT_GET(START_AREA_FAITH_MULTIPLIER);
 				rtnValue += iRingModifier * ComputeHappinessValue(pLoopPlot, NULL) * /*12*/ GD_INT_GET(START_AREA_HAPPINESS_MULTIPLIER);
-				rtnValue += iRingModifier * ComputeProductionValue(pLoopPlot, NULL) * /*8*/ GD_INT_GET(START_AREA_PRODUCTION_MULTIPLIER);
-				rtnValue += iRingModifier * ComputeGoldValue(pLoopPlot, NULL) * /*2*/ GD_INT_GET(START_AREA_GOLD_MULTIPLIER);
-				rtnValue += iRingModifier * ComputeScienceValue(pLoopPlot, NULL) * /*1*/ GD_INT_GET(START_AREA_SCIENCE_MULTIPLIER);
-				rtnValue += iRingModifier * ComputeFaithValue(pLoopPlot, NULL) * /*1*/ GD_INT_GET(START_AREA_FAITH_MULTIPLIER);
 				rtnValue += iRingModifier * ComputeTradeableResourceValue(pLoopPlot, NULL) * /*1*/ GD_INT_GET(START_AREA_RESOURCE_MULTIPLIER);
 				rtnValue += iRingModifier * ComputeStrategicValue(pLoopPlot, iDistance) * /*1*/ GD_INT_GET(START_AREA_STRATEGIC_MULTIPLIER);
 			}

@@ -10024,7 +10024,7 @@ void CvPlot::changeYield(YieldTypes eYield, int iChange)
     updateYield();
 }
 
-int CvPlot::calculateNatureYield(YieldTypes eYield, PlayerTypes ePlayer, FeatureTypes eFeature, ResourceTypes eResource, ImprovementTypes eImprovement, const CvCity* pOwningCity, bool bDisplay) const
+int CvPlot::calculateNatureYield(YieldTypes eYield, PlayerTypes ePlayer, FeatureTypes eFeature, ResourceTypes eResource, ImprovementTypes eImprovement, const CvCity* pOwningCity, bool bDisplay, bool bAssumeCityHere) const
 {
 	int iYield = 0;
 	TeamTypes eTeam = (ePlayer != NO_PLAYER) ? GET_PLAYER(ePlayer).getTeam() : NO_TEAM;
@@ -10147,7 +10147,7 @@ int CvPlot::calculateNatureYield(YieldTypes eYield, PlayerTypes ePlayer, Feature
 		}
 	}
 
-	if (pOwningCity && pOwningCity->plot() == this)
+	if (bAssumeCityHere || (pOwningCity && pOwningCity->plot() == this))
 	{
 		// VP: Set natural tile yields to 2 Food, 1 Production + resource yields + increases below, ignore everything above
 		if (MOD_BALANCE_VP)
@@ -10187,27 +10187,17 @@ int CvPlot::calculateNatureYield(YieldTypes eYield, PlayerTypes ePlayer, Feature
 		}
 		// Community Patch Only: Min. 2 Food & 1 Production for city center tile yields
 		else
+		{
 			iYield = std::max(iYield, pkYieldInfo->getMinCity());
-
-		// Yields from garrison
-		if (pOwningCity->HasGarrison())
-		{
-			CvUnit* pUnit = pOwningCity->GetGarrisonedUnit();
-			iYield += pUnit->GetGarrisonYieldChange(eYield) * pUnit->GetBaseCombatStrength() / 8;
 		}
 
-		if (!bDisplay || pOwningCity->isRevealed(GC.getGame().getActiveTeam(), false, false))
-		{
-			iYield += pkYieldInfo->getCityChange();
-			if (pkYieldInfo->getPopulationChangeDivisor() != 0)
-			{
-				iYield += (pOwningCity->getPopulation() + pkYieldInfo->getPopulationChangeOffset()) / pkYieldInfo->getPopulationChangeDivisor();
-			}
-		}
 
+		// Yield per Monopoly owned
 		if (ePlayer != NO_PLAYER)
 		{
 			CvPlayer& kPlayer = GET_PLAYER(ePlayer);
+
+			iYield += kPlayer.GetMonopolyCityYieldChange(eYield) * kPlayer.GetNumGlobalMonopolies();
 
 			// GetYieldFromXMilitaryUnits (France UA)
 			iYield += kPlayer.GetYieldFromMilitaryUnits(eYield);
@@ -10216,45 +10206,66 @@ int CvPlot::calculateNatureYield(YieldTypes eYield, PlayerTypes ePlayer, Feature
 			iYield += kPlayer.GetPlayerTraits()->GetCityYieldChanges(eYield);
 
 			// Coastal City Mod
-			if (pOwningCity->isCoastal())
+			if (isCoastalLand())
 			{
 				iYield += kPlayer.GetCoastalCityYieldChange(eYield);
 				iYield += kPlayer.GetPlayerTraits()->GetCoastalCityYieldChanges(eYield);
 			}
+		}
 
-			// Yield per Monopoly owned
-			iYield += kPlayer.GetMonopolyCityYieldChange(eYield) * kPlayer.GetNumGlobalMonopolies();
-
-			// Yields from city strength
-			if (pOwningCity->GetYieldChangesPerCityStrengthTimes100(eYield) > 0)
+		if (pOwningCity)
+		{
+			// Yields from garrison
+			if (pOwningCity->HasGarrison())
 			{
-				iYield += pOwningCity->GetYieldChangesPerCityStrengthTimes100(eYield) * pOwningCity->getStrengthValue() / 10000;
-			}
-			if (pOwningCity->getStrengthValue() >= GD_INT_GET(CITY_STRENGTH_THRESHOLD_FOR_BONUSES) * 100)
-			{
-				iYield += kPlayer.getYieldPerCityOverStrengthThreshold(eYield);
+				CvUnit* pUnit = pOwningCity->GetGarrisonedUnit();
+				iYield += pUnit->GetGarrisonYieldChange(eYield) * pUnit->GetBaseCombatStrength() / 8;
 			}
 
-			int iTemp = kPlayer.GetCityYieldChangeTimes100(eYield); // In hundreds - will be added to capitalYieldChange below
-
-			// Capital Mod
-			if (pOwningCity->isCapital())
+			if (!bDisplay || pOwningCity->isRevealed(GC.getGame().getActiveTeam(), false, false))
 			{
-				iTemp += kPlayer.GetCapitalYieldChangeTimes100(eYield);
-
-				iYield += kPlayer.GetPlayerTraits()->GetCapitalYieldChanges(eYield);
-
-				// Unfortunately these need to be rounded down individually until we rework all yields to have 2 decimals
-				int iPerPopYield = pOwningCity->getPopulation() * kPlayer.GetCapitalYieldPerPopChange(eYield);
-				iPerPopYield /= 100;
-				iYield += iPerPopYield;
-
-				int iPerPopYieldEmpire = kPlayer.getTotalPopulation() * kPlayer.GetCapitalYieldPerPopChangeEmpire(eYield);
-				iPerPopYieldEmpire /= 100;
-				iYield += iPerPopYieldEmpire;
+				iYield += pkYieldInfo->getCityChange();
+				if (pkYieldInfo->getPopulationChangeDivisor() != 0)
+				{
+					iYield += (pOwningCity->getPopulation() + pkYieldInfo->getPopulationChangeOffset()) / pkYieldInfo->getPopulationChangeDivisor();
+				}
 			}
 
-			iYield += iTemp / 100;
+			if (ePlayer != NO_PLAYER)
+			{
+				CvPlayer& kPlayer = GET_PLAYER(ePlayer);
+
+				// Yields from city strength
+				if (pOwningCity->GetYieldChangesPerCityStrengthTimes100(eYield) > 0)
+				{
+					iYield += pOwningCity->GetYieldChangesPerCityStrengthTimes100(eYield) * pOwningCity->getStrengthValue() / 10000;
+				}
+				if (pOwningCity->getStrengthValue() >= GD_INT_GET(CITY_STRENGTH_THRESHOLD_FOR_BONUSES) * 100)
+				{
+					iYield += kPlayer.getYieldPerCityOverStrengthThreshold(eYield);
+				}
+
+				int iTemp = kPlayer.GetCityYieldChangeTimes100(eYield); // In hundreds - will be added to capitalYieldChange below
+
+				// Capital Mod
+				if (pOwningCity->isCapital())
+				{
+					iTemp += kPlayer.GetCapitalYieldChangeTimes100(eYield);
+
+					iYield += kPlayer.GetPlayerTraits()->GetCapitalYieldChanges(eYield);
+
+					// Unfortunately these need to be rounded down individually until we rework all yields to have 2 decimals
+					int iPerPopYield = pOwningCity->getPopulation() * kPlayer.GetCapitalYieldPerPopChange(eYield);
+					iPerPopYield /= 100;
+					iYield += iPerPopYield;
+
+					int iPerPopYieldEmpire = kPlayer.getTotalPopulation() * kPlayer.GetCapitalYieldPerPopChangeEmpire(eYield);
+					iPerPopYieldEmpire /= 100;
+					iYield += iPerPopYieldEmpire;
+				}
+
+				iYield += iTemp / 100;
+			}
 		}
 	}
 
@@ -10287,7 +10298,7 @@ int CvPlot::calculateReligionNatureYield(YieldTypes eYield, PlayerTypes ePlayer,
 
 	if (ePlayer == NO_PLAYER)
 		return 0;
-
+	
 	int iYield = 0;
 
 	//Change for improvement/resource
@@ -10300,78 +10311,8 @@ int CvPlot::calculateReligionNatureYield(YieldTypes eYield, PlayerTypes ePlayer,
 	bool bRequiresBoth = (bRequiresImprovement && bRequiresResource);
 	if (eFeature == NO_FEATURE || !GC.getFeatureInfo(eFeature)->isYieldNotAdditive())
 	{
-	int iValue = pMajorityReligion->m_Beliefs.GetTerrainYieldChange(getTerrainType(), eYield, ePlayer, pOwningCity);
+		int iValue = pMajorityReligion->m_Beliefs.GetTerrainYieldChange(getTerrainType(), eYield, ePlayer, pOwningCity);
 		if (iValue > 0 && (bRequiresImprovement || bRequiresResource || bRequiresNoImprovement))
-	{
-		if (bRequiresBoth)
-		{
-			if (eImprovement != NO_IMPROVEMENT && eResource != NO_RESOURCE)
-			{
-				if (GC.getImprovementInfo(eImprovement)->IsConnectsResource(eResource))
-				{
-					iReligionChange += iValue;
-				}
-			}
-		}
-		else if (bRequiresImprovement)
-		{
-			if (eImprovement != NO_IMPROVEMENT)
-			{
-				iReligionChange += iValue;
-			}
-		}
-		else if (bRequiresResource)
-		{
-			if (eResource != NO_RESOURCE)
-			{
-				iReligionChange += iValue;
-			}
-		}
-		else if (bRequiresEmptyTile)
-		{
-			if (eImprovement == NO_IMPROVEMENT && eFeature == NO_FEATURE)
-			{
-				iReligionChange += iValue;
-			}
-		}
-		else if (bRequiresNoImprovement)
-		{
-			if (eImprovement == NO_IMPROVEMENT)
-			{
-				iReligionChange += iValue;
-			}
-		}
-		else if (bRequiresNoFeature)
-		{
-			if (eFeature == NO_FEATURE)
-			{
-				iReligionChange += iValue;
-			}
-		}
-		if (iReligionChange > iValue)
-		{
-			iReligionChange = iValue;
-		}
-	}
-	else
-	{
-		iReligionChange = iValue;
-	}
-
-	iYield += iReligionChange;
-
-	if (pSecondaryPantheon)
-	{
-		//Change for improvement/resource
-		iReligionChange = 0;
-		bool bRequiresImprovement = pSecondaryPantheon->RequiresImprovement();
-		bool bRequiresNoImprovement = pSecondaryPantheon->RequiresNoImprovement();
-		bool bRequiresResource = pSecondaryPantheon->RequiresResource();
-		bool bRequiresNoFeature = pSecondaryPantheon->RequiresNoFeature();
-		bool bRequiresEmptyTile = (bRequiresResource && bRequiresNoFeature);
-		bool bRequiresBoth = (bRequiresImprovement && bRequiresResource);
-		int iValue = pSecondaryPantheon->GetTerrainYieldChange(getTerrainType(), eYield);
-			if (iValue > 0 && (bRequiresImprovement || bRequiresResource || bRequiresNoImprovement))
 		{
 			if (bRequiresBoth)
 			{
@@ -10387,10 +10328,7 @@ int CvPlot::calculateReligionNatureYield(YieldTypes eYield, PlayerTypes ePlayer,
 			{
 				if (eImprovement != NO_IMPROVEMENT)
 				{
-					if (GC.getImprovementInfo(eImprovement)->IsConnectsResource(eResource))
-					{
-						iReligionChange += iValue;
-					}
+					iReligionChange += iValue;
 				}
 			}
 			else if (bRequiresResource)
@@ -10402,7 +10340,7 @@ int CvPlot::calculateReligionNatureYield(YieldTypes eYield, PlayerTypes ePlayer,
 			}
 			else if (bRequiresEmptyTile)
 			{
-				if (eImprovement == NO_IMPROVEMENT && getFeatureType() == NO_FEATURE)
+				if (eImprovement == NO_IMPROVEMENT && eFeature == NO_FEATURE)
 				{
 					iReligionChange += iValue;
 				}
@@ -10432,7 +10370,80 @@ int CvPlot::calculateReligionNatureYield(YieldTypes eYield, PlayerTypes ePlayer,
 		}
 
 		iYield += iReligionChange;
-	}
+
+		if (pSecondaryPantheon)
+		{
+			//Change for improvement/resource
+			iReligionChange = 0;
+			bool bRequiresImprovement = pSecondaryPantheon->RequiresImprovement();
+			bool bRequiresNoImprovement = pSecondaryPantheon->RequiresNoImprovement();
+			bool bRequiresResource = pSecondaryPantheon->RequiresResource();
+			bool bRequiresNoFeature = pSecondaryPantheon->RequiresNoFeature();
+			bool bRequiresEmptyTile = (bRequiresResource && bRequiresNoFeature);
+			bool bRequiresBoth = (bRequiresImprovement && bRequiresResource);
+			int iValue = pSecondaryPantheon->GetTerrainYieldChange(getTerrainType(), eYield);
+			if (iValue > 0 && (bRequiresImprovement || bRequiresResource || bRequiresNoImprovement))
+			{
+				if (bRequiresBoth)
+				{
+					if (eImprovement != NO_IMPROVEMENT && eResource != NO_RESOURCE)
+					{
+						if (GC.getImprovementInfo(eImprovement)->IsConnectsResource(eResource))
+						{
+							iReligionChange += iValue;
+						}
+					}
+				}
+				else if (bRequiresImprovement)
+				{
+					if (eImprovement != NO_IMPROVEMENT)
+					{
+						if (GC.getImprovementInfo(eImprovement)->IsConnectsResource(eResource))
+						{
+							iReligionChange += iValue;
+						}
+					}
+				}
+				else if (bRequiresResource)
+				{
+					if (eResource != NO_RESOURCE)
+					{
+						iReligionChange += iValue;
+					}
+				}
+				else if (bRequiresEmptyTile)
+				{
+					if (eImprovement == NO_IMPROVEMENT && getFeatureType() == NO_FEATURE)
+					{
+						iReligionChange += iValue;
+					}
+				}
+				else if (bRequiresNoImprovement)
+				{
+					if (eImprovement == NO_IMPROVEMENT)
+					{
+						iReligionChange += iValue;
+					}
+				}
+				else if (bRequiresNoFeature)
+				{
+					if (eFeature == NO_FEATURE)
+					{
+						iReligionChange += iValue;
+					}
+				}
+				if (iReligionChange > iValue)
+				{
+					iReligionChange = iValue;
+				}
+			}
+			else
+			{
+				iReligionChange = iValue;
+			}
+
+			iYield += iReligionChange;
+		}
 	}
 
 	iYield += pMajorityReligion->m_Beliefs.GetPlotYieldChange(getPlotType(), eYield, ePlayer, pOwningCity);

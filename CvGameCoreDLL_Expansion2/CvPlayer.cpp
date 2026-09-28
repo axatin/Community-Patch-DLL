@@ -25015,7 +25015,7 @@ int CvPlayer::GetGreatGeneralRateTimes100() const
 	// and minor civs
 	iGreatGeneralPointsTimes100 += GetYieldPerTurnFromMinorCivsTimes100(YIELD_GREAT_GENERAL_POINTS);
 	iGreatGeneralPointsTimes100 += GetYieldPerTurnFromAnnexedMinorsTimes100(YIELD_GREAT_GENERAL_POINTS);
-
+	
 	return iGreatGeneralPointsTimes100;
 }
 
@@ -47928,9 +47928,23 @@ CvPlot* CvPlayer::GetBestSettlePlot(CvUnit* pUnit, CvAIOperation* pOpToIgnore, b
 
 	//--------
 	bool bLogging = (GC.getLogging() && GC.getAILogging()) || bForceLogging;
-	std::stringstream dump;
 	int iDanger=0;
 	int iFertility=0;
+
+	FILogFile* pLog = NULL;
+	if (bLogging)
+	{
+		std::stringstream ss;
+		ss << "CitySites_" << getCivilizationShortDescription() << "_" << std::setfill('0') << std::setw(3) << GC.getGame().getGameTurn() << ".txt";
+		pLog = LOGFILEMGR.GetLog(ss.str().c_str(), FILogFile::kDontTimeStamp);
+
+		CvString msg;
+		if (pUnit)
+			msg.Format("Calculating Best Settle Plot for Unit %d at (%d, %d)", pUnit->GetID(), pUnit->getX(), pUnit->getY());
+		else
+			msg.Format("Calculating Best Settle Plot");
+		pLog->Msg(msg.c_str());
+	}
 	//--------
 
 	PlayerTypes eOwner = pUnit ? pUnit->getOwner() : GetID();
@@ -47974,26 +47988,25 @@ CvPlot* CvPlayer::GetBestSettlePlot(CvUnit* pUnit, CvAIOperation* pOpToIgnore, b
 		CvPlot* pPlot = kMap.plotByIndexUnchecked(iPlotLoop);
 		ASSERT(pPlot != NULL, "plotByIndexUnchecked returned null - invalid plot index");
 
+		if (!pPlot->isRevealed(eTeam))
+			continue;
+
 		if (bLogging)
 		{
 			iDanger = pUnit ? pUnit->GetDanger(pPlot) : 0;
 			iFertility = GC.getGame().GetSettlerSiteEvaluator()->PlotFertilityValue(pPlot,this,true);
 		}
 
-		if(!pPlot->isRevealed(eTeam))
-		{
-			//--------------
-			if (bLogging)
-			dump << pPlot << ",0," << iDanger << "," << iFertility << ",-1" << ",0" << std::endl;
-			//--------------
-			continue;
-		}
 
 		if ((pPlot->isOwned() && pPlot->getOwner() != eOwner) || (pPlot->getRevealedImprovementType(eTeam) == (ImprovementTypes)GD_INT_GET(BARBARIAN_CAMP_IMPROVEMENT)))
 		{
 			//--------------
 			if (bLogging)
-			dump << pPlot << ",1," << iDanger << "," << iFertility << ",-1" << ",-2" << std::endl;
+			{
+				CvString msg;
+				msg.Format("%02d, %03d, skipped - Plot has Barb Camp or is owned by other player", pPlot->getX(), pPlot->getY());
+				pLog->Msg(msg.c_str());
+			}
 			//--------------
 			continue;
 		}
@@ -48003,7 +48016,11 @@ CvPlot* CvPlayer::GetBestSettlePlot(CvUnit* pUnit, CvAIOperation* pOpToIgnore, b
 		{
 			//--------------
 			if (bLogging)
-			dump << pPlot << ",1," << iDanger << "," << iFertility << ",-1" << ",-2" << std::endl;
+			{
+				CvString msg;
+				msg.Format("%02d, %03d, skipped - Plot in enemy tactical territory zone", pPlot->getX(), pPlot->getY());
+				pLog->Msg(msg.c_str());
+			}
 			//--------------
 			continue;
 		}
@@ -48014,7 +48031,11 @@ CvPlot* CvPlayer::GetBestSettlePlot(CvUnit* pUnit, CvAIOperation* pOpToIgnore, b
 			{
 				//--------------
 				if (bLogging)
-				dump << pPlot << ",1," << iDanger << "," << iFertility << ",-1" << ",-2" << std::endl;
+				{
+					CvString msg;
+					msg.Format("%02d, %03d, skipped - Plot close to enemy %s city", pPlot->getX(), pPlot->getY(), GET_PLAYER(*it).getCivilizationAdjective());
+					pLog->Msg(msg.c_str());
+				}
 				//--------------
 				continue;
 			}
@@ -48024,7 +48045,11 @@ CvPlot* CvPlayer::GetBestSettlePlot(CvUnit* pUnit, CvAIOperation* pOpToIgnore, b
 		{
 			//--------------
 			if (bLogging)
-			dump << pPlot << ",1," << iDanger << "," << iFertility << ",-1" << ",-1" << std::endl;
+			{
+				CvString msg;
+				msg.Format("%02d, %03d, skipped - Unit can't move into / found city at plot", pPlot->getX(), pPlot->getY());
+				pLog->Msg(msg.c_str());
+			}
 			//--------------
 			continue;
 		}
@@ -48033,7 +48058,11 @@ CvPlot* CvPlayer::GetBestSettlePlot(CvUnit* pUnit, CvAIOperation* pOpToIgnore, b
 		{
 			//--------------
 			if (bLogging)
-			dump << pPlot << ",1," << iDanger << "," << iFertility << ",-1" << ",-3" << std::endl;
+			{
+				CvString msg;
+				msg.Format("%02d, %03d, skipped - Plot already targeted by other unit", pPlot->getX(), pPlot->getY());
+				pLog->Msg(msg.c_str());
+			}
 			//--------------
 			continue;
 		}
@@ -48042,7 +48071,11 @@ CvPlot* CvPlayer::GetBestSettlePlot(CvUnit* pUnit, CvAIOperation* pOpToIgnore, b
 		{
 			//--------------
 			if (bLogging)
-			dump << pPlot << ",1," << iDanger << "," << iFertility << ",-1" << ",-4" << std::endl;
+			{
+				CvString msg;
+				msg.Format("%02d, %03d, skipped - Plot unreachable because the unit can't embark", pPlot->getX(), pPlot->getY());
+				pLog->Msg(msg.c_str());
+			}
 			//--------------
 			continue;
 		}
@@ -48075,7 +48108,11 @@ CvPlot* CvPlayer::GetBestSettlePlot(CvUnit* pUnit, CvAIOperation* pOpToIgnore, b
 		{
 			//--------------
 			if (bLogging)
-			dump << pPlot << ",1," << iDanger << "," << iFertility << ",0" << ",-5" << std::endl;
+			{
+				CvString msg;
+				msg.Format("%02d, %03d, skipped - Non-coastal plot on a new continent", pPlot->getX(), pPlot->getY());
+				pLog->Msg(msg.c_str());
+			}
 			//--------------
 			continue;
 		}
@@ -48087,7 +48124,12 @@ CvPlot* CvPlayer::GetBestSettlePlot(CvUnit* pUnit, CvAIOperation* pOpToIgnore, b
 			CvString strDebug;
 			iValue = GC.getGame().GetSettlerSiteEvaluator()->PlotFoundValue(pPlot, this, ignorePlots, bNewContinent, &strDebug);
 			//--------------
-			dump << pPlot << ",1," << iDanger << "," << iFertility << "," << iScale << "," << iValue << "," << strDebug.c_str() << std::endl;
+			if (bLogging)
+			{
+				CvString msg;
+				msg.Format("%02d, %03d, valid   - Value %d, Fert. %03d, Dist. %d, Danger %d. Remarks:", pPlot->getX(), pPlot->getY(), iValue, iFertility, iScale, iDanger, strDebug.c_str());
+				pLog->Msg(msg.c_str());
+			}
 			//--------------
 		}
 		else
@@ -48105,18 +48147,16 @@ CvPlot* CvPlayer::GetBestSettlePlot(CvUnit* pUnit, CvAIOperation* pOpToIgnore, b
 		vSettlePlots.push_back( SPlotWithScore(pPlot,iValue) );
 	}
 
-	if (bLogging)
-	{
-		std::stringstream ss;
-		ss << "CitySites_" << getCivilizationAdjective() << "_" << std::setfill('0') << std::setw(3) << GC.getGame().getGameTurn() << ".txt";
-		FILogFile* pLog=LOGFILEMGR.GetLog( ss.str().c_str(), FILogFile::kDontTimeStamp );
-		pLog->Msg( "#x,y,terrain,plotype,feature,owner,area,revealed,danger,fertility,distancescale,value,comments\n" );
-		pLog->Msg( dump.str().c_str() );
-		pLog->Close();
-	}
-
 	if (vSettlePlots.empty())
+	{
+		if (bLogging)
+		{
+			CvString msg;
+			msg.Format("\nNo valid settle plots found");
+			pLog->Msg(msg.c_str());
+		}
 		return 0;
+	}
 
 	//order by increasing score
 	std::stable_sort( vSettlePlots.begin(), vSettlePlots.end() );
@@ -48137,6 +48177,12 @@ CvPlot* CvPlayer::GetBestSettlePlot(CvUnit* pUnit, CvAIOperation* pOpToIgnore, b
 		{
 			if (!pUnit->GeneratePath(it->pPlot, iFlags, 23))
 			{
+				if (bLogging)
+				{
+					CvString msg;
+					msg.Format("\nTop Plot #%d (%d, %d), score %d unreachable for settler at (%d, %d)", iFailedAttempts + 1, it->pPlot->getX(), it->pPlot->getY(), it->score, pUnit->getX(), pUnit->getY());
+					pLog->Msg(msg.c_str());
+				}
 				iFailedAttempts++;
 				continue;
 			}
@@ -48144,10 +48190,29 @@ CvPlot* CvPlayer::GetBestSettlePlot(CvUnit* pUnit, CvAIOperation* pOpToIgnore, b
 		else
 		{
 			if (reachablePlots.empty())
+			{
 				reachablePlots = GC.GetPathFinder().GetPlotsInReach(pUnit->plot(), SPathFinderUserData(pUnit, iFlags, 23));
+				if (reachablePlots.empty())
+				{
+					if (bLogging)
+					{
+						CvString msg;
+						msg.Format("\nNo plots in reach for settler at (%d, %d)", pUnit->getX(), pUnit->getY());
+						pLog->Msg(msg.c_str());
+					}
+					// nothing in reach?
+					return NULL;
+				}
+			}
 
 			if (reachablePlots.find(it->pPlot->GetPlotIndex()) == reachablePlots.end())
 				continue;
+		}
+		if (bLogging)
+		{
+			CvString msg;
+			msg.Format("\nTop Plot #%d (%d, %d), score %d chosen as best settle plot for settler at (%d, %d)", iFailedAttempts + 1, it->pPlot->getX(), it->pPlot->getY(), it->score, pUnit->getX(), pUnit->getY());
+			pLog->Msg(msg.c_str());
 		}
 		return it->pPlot;
 	}

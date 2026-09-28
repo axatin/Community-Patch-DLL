@@ -39,12 +39,8 @@ public:
 
 protected:
 	// Each of these routines computes a number from 0 (no value) to 100 (best possible value)
-	virtual int ComputeFoodValue(CvPlot* pPlot, const CvPlayer* pPlayer);
+	virtual int ComputeYieldValue(CvPlot* pPlot, YieldTypes eYield, const CvPlayer* pPlayer, int iDistance = -1);
 	virtual int ComputeHappinessValue(CvPlot* pPlot, const CvPlayer* pPlayer);
-	virtual int ComputeProductionValue(CvPlot* pPlot, const CvPlayer* pPlayer);
-	virtual int ComputeGoldValue(CvPlot* pPlot, const CvPlayer* pPlayer);
-	virtual int ComputeScienceValue(CvPlot* pPlot, const CvPlayer* pPlayer);
-	virtual int ComputeFaithValue(CvPlot* pPlot, const CvPlayer* pPlayer);
 	virtual int ComputeTradeableResourceValue(CvPlot* pPlot, const CvPlayer* pPlayer);
 	virtual int ComputeStrategicValue(CvPlot* pPlot, int iPlotsFromCity);
 
